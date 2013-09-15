@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 import argparse
+import multiprocessing
 import os
 import subprocess
 
@@ -40,7 +41,29 @@ for test_binary in args.gtest_binary:
     if not args.gtest_also_run_disabled_tests and 'DISABLED' in line:
       continue
 
-    tests.append((command, test_group + line))
+    tests.append((command, len(tests), test_group + line))
 
-for (command, test) in tests:
-  print test
+def run_job((command, job_id, test)):
+  sub = subprocess.Popen(command + ['--gtest_filter=' + test],
+                         stdout = subprocess.PIPE,
+                         stderr = subprocess.STDOUT)
+
+  do_print = False
+  while True:
+    line = sub.stdout.readline()
+
+    # EOF, stop reading.
+    if line == '':
+      break
+
+    if line and '[' == line[0] and test in line:
+      do_print = not do_print
+      print str(job_id) + ">", line,
+      continue
+
+    if do_print:
+      print str(job_id) + ">", line,
+
+  sub.wait()
+
+multiprocessing.Pool(args.processes).map(run_job, tests)
