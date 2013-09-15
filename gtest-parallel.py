@@ -56,7 +56,7 @@ def run_job((command, job_id, test)):
     if line == '':
       break
 
-    if line and '[' == line[0] and test in line:
+    if line[0] == '[' and test in line:
       do_print = not do_print
       print str(job_id) + ">", line,
       continue
