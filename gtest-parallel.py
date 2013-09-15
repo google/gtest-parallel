@@ -1,30 +1,33 @@
 #!/usr/bin/env python2
-import argparse
+import optparse
 import multiprocessing
 import os
 import subprocess
 import sys
 
-parser = argparse.ArgumentParser(prog=os.path.basename(__file__),
-                                 description='Run gtests in parallel.')
+parser = optparse.OptionParser(
+    usage = "usage: %prog [options] executable [executable ...]")
 
-parser.add_argument('gtest_binary', type=str, nargs='+')
-parser.add_argument('-p', '--processes', type=int, nargs='?', default=16,
-                    help='Number of processes to spawn (default: %(default)s).')
-parser.add_argument('--gtest_filter', type=str, default='',
+parser.add_option('-p', '--processes', type="int", default=16,
+                    help='Number of processes to spawn.')
+parser.add_option('--gtest_filter', type="string", default='',
                     help='Test filter.')
-parser.add_argument('--gtest_also_run_disabled_tests', action='store_true',
+parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
                     default=False, help='Run disabled tests too.')
 
-args = parser.parse_args()
+(options, binaries) = parser.parse_args()
+
+if binaries == []:
+  parser.print_usage()
+  sys.exit(1)
 
 tests = []
 # Find tests.
-for test_binary in args.gtest_binary:
+for test_binary in binaries:
   command = [test_binary]
-  if args.gtest_filter != '':
-    command += ['--gtest_filter=' + args.gtest_filter]
-  if args.gtest_also_run_disabled_tests:
+  if options.gtest_filter != '':
+    command += ['--gtest_filter=' + options.gtest_filter]
+  if options.gtest_also_run_disabled_tests:
     command += ['--gtest_also_run_disabled_tests']
 
   test_list = subprocess.check_output(command + ['--gtest_list_tests'])
@@ -39,7 +42,7 @@ for test_binary in args.gtest_binary:
     line = line.strip()
 
     # Skip disabled tests unless they should be run
-    if not args.gtest_also_run_disabled_tests and 'DISABLED' in line:
+    if not options.gtest_also_run_disabled_tests and 'DISABLED' in line:
       continue
 
     tests.append((command, len(tests), test_group + line))
@@ -67,7 +70,7 @@ def run_job((command, job_id, test)):
 
   return sub.wait()
 
-return_codes = multiprocessing.Pool(args.processes).map(run_job, tests)
+return_codes = multiprocessing.Pool(options.processes).map(run_job, tests)
 
 for code in return_codes:
   if code != 0:
