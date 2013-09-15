@@ -3,6 +3,7 @@ import argparse
 import multiprocessing
 import os
 import subprocess
+import sys
 
 parser = argparse.ArgumentParser(prog=os.path.basename(__file__),
                                  description='Run gtests in parallel.')
@@ -64,6 +65,10 @@ def run_job((command, job_id, test)):
     if do_print:
       print str(job_id) + ">", line,
 
-  sub.wait()
+  return sub.wait()
 
-multiprocessing.Pool(args.processes).map(run_job, tests)
+return_codes = multiprocessing.Pool(args.processes).map(run_job, tests)
+
+for code in return_codes:
+  if code != 0:
+    sys.exit(code)
