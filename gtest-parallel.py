@@ -1,7 +1,6 @@
 #!/usr/bin/env python2
 import optparse
 import multiprocessing
-import os
 import subprocess
 import sys
 
@@ -9,11 +8,11 @@ parser = optparse.OptionParser(
     usage = "usage: %prog [options] executable [executable ...]")
 
 parser.add_option('-p', '--processes', type="int", default=16,
-                    help='Number of processes to spawn.')
+                  help='number of processes to spawn')
 parser.add_option('--gtest_filter', type="string", default='',
-                    help='Test filter.')
+                  help='test filter')
 parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
-                    default=False, help='Run disabled tests too.')
+                  default=False, help='run disabled tests too')
 
 (options, binaries) = parser.parse_args()
 
@@ -30,7 +29,8 @@ for test_binary in binaries:
   if options.gtest_also_run_disabled_tests:
     command += ['--gtest_also_run_disabled_tests']
 
-  test_list = subprocess.check_output(command + ['--gtest_list_tests'])
+  test_list = subprocess.Popen(command + ['--gtest_list_tests'],
+                               stdout=subprocess.PIPE).communicate()[0]
 
   test_group = ''
   for line in test_list.split('\n'):
