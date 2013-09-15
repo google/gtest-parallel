@@ -70,7 +70,8 @@ def run_job((command, job_id, test)):
 
   return sub.wait()
 
-return_codes = multiprocessing.Pool(options.processes).map(run_job, tests)
+return_codes = multiprocessing.Pool(options.processes).map(run_job, tests,
+                                                           chunksize = 1)
 
 for code in return_codes:
   if code != 0:
