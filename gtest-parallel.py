@@ -24,7 +24,6 @@ if binaries == []:
 tests = Queue.Queue()
 return_code = 0
 
-job_id = 0
 # Find tests.
 for test_binary in binaries:
   command = [test_binary]
@@ -36,6 +35,7 @@ for test_binary in binaries:
   test_list = subprocess.Popen(command + ['--gtest_list_tests'],
                                stdout=subprocess.PIPE).communicate()[0]
 
+  job_id = 0
   test_group = ''
   for line in test_list.split('\n'):
     if not line.strip():
@@ -58,6 +58,9 @@ def run_job((command, job_id, test)):
                          stderr = subprocess.STDOUT)
 
   do_print = False
+  printed_binary = ""
+  if len(binaries) > 1:
+    printed_binary = command[0] + ":"
   while True:
     line = sub.stdout.readline()
 
@@ -66,7 +69,7 @@ def run_job((command, job_id, test)):
     if line[0] == '[' and test in line:
       do_print = not do_print
     if do_print:
-      print str(job_id) + ">", line,
+      print printed_binary + str(job_id) + ">", line,
 
   code = sub.wait()
   if code != 0:
