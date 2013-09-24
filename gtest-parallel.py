@@ -1,8 +1,9 @@
 #!/usr/bin/env python2
+import Queue
 import optparse
-import multiprocessing
 import subprocess
 import sys
+import threading
 
 parser = optparse.OptionParser(
     usage = "usage: %prog [options] executable [executable ...]")
@@ -20,7 +21,10 @@ if binaries == []:
   parser.print_usage()
   sys.exit(1)
 
-tests = []
+tests = Queue.Queue()
+return_code = 0
+
+job_id = 0
 # Find tests.
 for test_binary in binaries:
   command = [test_binary]
@@ -45,7 +49,8 @@ for test_binary in binaries:
     if not options.gtest_also_run_disabled_tests and 'DISABLED' in line:
       continue
 
-    tests.append((command, len(tests), test_group + line))
+    tests.put((command, job_id, test_group + line))
+    job_id += 1
 
 def run_job((command, job_id, test)):
   sub = subprocess.Popen(command + ['--gtest_filter=' + test],
@@ -62,17 +67,29 @@ def run_job((command, job_id, test)):
 
     if line[0] == '[' and test in line:
       do_print = not do_print
-      print str(job_id) + ">", line,
-      continue
 
     if do_print:
       print str(job_id) + ">", line,
 
-  return sub.wait()
-
-return_codes = multiprocessing.Pool(options.processes).map(run_job, tests,
-                                                           chunksize = 1)
-
-for code in return_codes:
+  code = sub.wait()
   if code != 0:
-    sys.exit(code)
+    return_code = code
+
+def worker():
+  while True:
+    try:
+      run_job(tests.get_nowait())
+      tests.task_done()
+    except Queue.Empty:
+      return
+
+# Start workers
+for i in range(options.processes):
+  t = threading.Thread(target=worker)
+  t.daemon = True
+  t.start()
+
+# Wait for workers to finish
+tests.join()
+
+sys.exit(return_code)
