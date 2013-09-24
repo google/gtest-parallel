@@ -8,8 +8,8 @@ import threading
 parser = optparse.OptionParser(
     usage = "usage: %prog [options] executable [executable ...]")
 
-parser.add_option('-p', '--processes', type="int", default=16,
-                  help='number of processes to spawn')
+parser.add_option('-w', '--workers', type="int", default=16,
+                  help='number of workers to spawn')
 parser.add_option('--gtest_filter', type="string", default='',
                   help='test filter')
 parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
@@ -61,13 +61,10 @@ def run_job((command, job_id, test)):
   while True:
     line = sub.stdout.readline()
 
-    # EOF, stop reading.
     if line == '':
       break
-
     if line[0] == '[' and test in line:
       do_print = not do_print
-
     if do_print:
       print str(job_id) + ">", line,
 
@@ -84,7 +81,7 @@ def worker():
       return
 
 # Start workers
-for i in range(options.processes):
+for i in range(options.workers):
   t = threading.Thread(target=worker)
   t.daemon = True
   t.start()
