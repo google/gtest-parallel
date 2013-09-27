@@ -68,8 +68,10 @@ def run_job((command, job_id, test)):
       break
     if line[0] == '[' and test in line:
       do_print = not do_print
+      print printed_binary + str(job_id) + "> " + line,
+      continue
     if do_print:
-      print printed_binary + str(job_id) + ">", line,
+      print printed_binary + str(job_id) + "> " + line,
 
   code = sub.wait()
   if code != 0:
@@ -83,13 +85,13 @@ def worker():
     except Queue.Empty:
       return
 
-# Start workers
+threads = []
 for i in range(options.workers):
   t = threading.Thread(target=worker)
   t.daemon = True
-  t.start()
+  threads.append(t)
 
-# Wait for workers to finish
-tests.join()
+[t.start() for t in threads]
+[t.join() for t in threads]
 
 sys.exit(return_code)
