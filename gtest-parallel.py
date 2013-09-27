@@ -6,11 +6,11 @@ import sys
 import threading
 
 parser = optparse.OptionParser(
-    usage = "usage: %prog [options] executable [executable ...]")
+    usage = 'usage: %prog [options] executable [executable ...]')
 
-parser.add_option('-w', '--workers', type="int", default=16,
+parser.add_option('-w', '--workers', type='int', default=16,
                   help='number of workers to spawn')
-parser.add_option('--gtest_filter', type="string", default='',
+parser.add_option('--gtest_filter', type='string', default='',
                   help='test filter')
 parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
                   default=False, help='run disabled tests too')
@@ -22,9 +22,9 @@ if binaries == []:
   sys.exit(1)
 
 tests = Queue.Queue()
-return_code = 0
 
 # Find tests.
+job_id = 0
 for test_binary in binaries:
   command = [test_binary]
   if options.gtest_filter != '':
@@ -35,7 +35,6 @@ for test_binary in binaries:
   test_list = subprocess.Popen(command + ['--gtest_list_tests'],
                                stdout=subprocess.PIPE).communicate()[0]
 
-  job_id = 0
   test_group = ''
   for line in test_list.split('\n'):
     if not line.strip():
@@ -49,7 +48,9 @@ for test_binary in binaries:
     if not options.gtest_also_run_disabled_tests and 'DISABLED' in line:
       continue
 
-    tests.put((command, job_id, test_group + line))
+    test = test_group + line
+    tests.put((command, job_id, test))
+    print str(job_id) + ': TEST ' + test_binary + ' ' + test
     job_id += 1
 
 def run_job((command, job_id, test)):
@@ -57,25 +58,16 @@ def run_job((command, job_id, test)):
                          stdout = subprocess.PIPE,
                          stderr = subprocess.STDOUT)
 
-  do_print = False
-  printed_binary = ""
-  if len(binaries) > 1:
-    printed_binary = command[0] + ":"
   while True:
     line = sub.stdout.readline()
 
     if line == '':
       break
-    if line[0] == '[' and test in line:
-      do_print = not do_print
-      print printed_binary + str(job_id) + "> " + line,
-      continue
-    if do_print:
-      print printed_binary + str(job_id) + "> " + line,
+
+    print str(job_id) + '> ' + line.rstrip()
 
   code = sub.wait()
-  if code != 0:
-    return_code = code
+  print str(job_id) + ': EXIT ' + str(code)
 
 def worker():
   while True:
@@ -93,5 +85,3 @@ for i in range(options.workers):
 
 [t.start() for t in threads]
 [t.join() for t in threads]
-
-sys.exit(return_code)
