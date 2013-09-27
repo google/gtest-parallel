@@ -41,7 +41,7 @@ for test_binary in binaries:
     if not line.strip():
       continue
     if line[0] != " ":
-      test_group = line
+      test_group = line.strip()
       continue
     line = line.strip()
 
