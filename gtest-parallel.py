@@ -44,8 +44,6 @@ for test_binary in binaries:
       test_group = line.strip()
       continue
     line = line.strip()
-
-    # Skip disabled tests unless they should be run
     if not options.gtest_also_run_disabled_tests and 'DISABLED' in line:
       continue
 
@@ -61,10 +59,8 @@ def run_job((command, job_id, test)):
 
   while True:
     line = sub.stdout.readline()
-
     if line == '':
       break
-
     log.put(str(job_id) + '> ' + line.rstrip())
 
   code = sub.wait()
@@ -83,17 +79,18 @@ def logger():
     line = log.get()
     if line == "":
       return
-    print line
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
 
-threads = []
-for i in range(options.workers):
-  t = threading.Thread(target=worker)
+def start_daemon(func):
+  t = threading.Thread(target=func)
   t.daemon = True
-  threads.append(t)
+  t.start()
+  return t
 
-[t.start() for t in threads]
-printer = threading.Thread(target=logger)
-printer.start()
-[t.join() for t in threads]
+workers = [start_daemon(worker) for i in range(options.workers)]
+printer = start_daemon(logger)
+
+[t.join() for t in workers]
 log.put("")
 printer.join()
