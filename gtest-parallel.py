@@ -21,6 +21,7 @@ if binaries == []:
   parser.print_usage()
   sys.exit(1)
 
+log = Queue.Queue()
 tests = Queue.Queue()
 
 # Find tests.
@@ -64,10 +65,10 @@ def run_job((command, job_id, test)):
     if line == '':
       break
 
-    print str(job_id) + '> ' + line.rstrip()
+    log.put(str(job_id) + '> ' + line.rstrip())
 
   code = sub.wait()
-  print str(job_id) + ': EXIT ' + str(code)
+  log.put(str(job_id) + ': EXIT ' + str(code))
 
 def worker():
   while True:
@@ -77,6 +78,13 @@ def worker():
     except Queue.Empty:
       return
 
+def logger():
+  while True:
+    line = log.get()
+    if line == "":
+      return
+    print line
+
 threads = []
 for i in range(options.workers):
   t = threading.Thread(target=worker)
@@ -84,4 +92,8 @@ for i in range(options.workers):
   threads.append(t)
 
 [t.start() for t in threads]
+printer = threading.Thread(target=logger)
+printer.start()
 [t.join() for t in threads]
+log.put("")
+printer.join()
