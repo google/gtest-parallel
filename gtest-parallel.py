@@ -4,23 +4,23 @@ import optparse
 import subprocess
 import sys
 import threading
+import time
 
 class FilterFormat:
   total_tests = 0
   finished_tests = 0
 
   tests = {}
-  last_finished_test = ""
   outputs = {}
   failures = []
 
-  def print_test_status(self):
-    print "[%d/%d] %s" % (self.finished_tests,
-                          self.total_tests,
-                          self.last_finished_test)
+  def print_test_status(self, last_finished_test, time_ms):
+    print "[%d/%d] %s (%d ms)" % (self.finished_tests,
+                                  self.total_tests,
+                                  last_finished_test,
+                                  time_ms)
 
   def handle_meta(self, job_id, args):
-    global total_tests, finished_tests, last_finished_test
     (command, arg) = args.split(' ', 1)
     if command == "TEST":
       (binary, test) = arg.split(' ', 1)
@@ -28,15 +28,14 @@ class FilterFormat:
       self.outputs[job_id] = []
       self.total_tests += 1
     elif command == "EXIT":
-      exit_code = int(arg.strip())
+      (exit_code, time_ms) = [int(x) for x in arg.split(' ', 1)]
       self.finished_tests += 1
       (binary, test) = self.tests[job_id]
-      self.last_finished_test = test
+      self.print_test_status(test, time_ms)
       if exit_code != 0:
         self.failures.append(self.tests[job_id])
         for line in self.outputs[job_id]:
           print line
-      self.print_test_status()
 
   def add_stdout(self, job_id, output):
     self.outputs[job_id].append(output)
@@ -125,6 +124,7 @@ for test_binary in binaries:
 
 exit_code = 0
 def run_job((command, job_id, test)):
+  begin = time.time()
   sub = subprocess.Popen(command + ['--gtest_filter=' + test],
                          stdout = subprocess.PIPE,
                          stderr = subprocess.STDOUT)
@@ -136,7 +136,8 @@ def run_job((command, job_id, test)):
     log.put(str(job_id) + '> ' + line.rstrip())
 
   code = sub.wait()
-  log.put(str(job_id) + ': EXIT ' + str(code))
+  runtime_ms = int(1000 * (time.time() - begin))
+  log.put(str(job_id) + ': EXIT ' + str(code) + ' ' + str(runtime_ms))
   if code != 0:
     global exit_code
     exit_code = code
