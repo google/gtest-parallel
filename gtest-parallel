@@ -70,6 +70,8 @@ parser = optparse.OptionParser(
 
 parser.add_option('-w', '--workers', type='int', default=16,
                   help='number of workers to spawn')
+parser.add_option('--gtest_color', type='string', default='yes',
+                  help='color output')
 parser.add_option('--gtest_filter', type='string', default='',
                   help='test filter')
 parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
@@ -125,7 +127,8 @@ for test_binary in binaries:
 exit_code = 0
 def run_job((command, job_id, test)):
   begin = time.time()
-  sub = subprocess.Popen(command + ['--gtest_filter=' + test],
+  sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
+                           ['--gtest_color=' + options.gtest_color],
                          stdout = subprocess.PIPE,
                          stderr = subprocess.STDOUT)
 
