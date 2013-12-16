@@ -68,6 +68,8 @@ class RawFormat:
 parser = optparse.OptionParser(
     usage = 'usage: %prog [options] executable [executable ...]')
 
+parser.add_option('-r', '--repeat', type='int', default=1,
+                  help='repeat tests')
 parser.add_option('-w', '--workers', type='int', default=16,
                   help='number of workers to spawn')
 parser.add_option('--gtest_color', type='string', default='yes',
@@ -84,6 +86,10 @@ parser.add_option('--format', type='string', default='filter',
 if binaries == []:
   parser.print_usage()
   sys.exit(1)
+
+# Repeat tests multiple times. Although this way requires the binaries' lists to
+# be queried multiple time this gives fewer code paths.
+binaries *= options.repeat
 
 log = Queue.Queue()
 tests = Queue.Queue()
