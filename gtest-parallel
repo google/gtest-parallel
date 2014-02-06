@@ -41,6 +41,7 @@ class FilterFormat:
     self.outputs[job_id].append(output)
 
   def log(self):
+    print "[0/?] Running tests...\r",
     while True:
       line = log.get()
       if line == "":
