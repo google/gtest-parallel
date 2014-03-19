@@ -88,13 +88,6 @@ if binaries == []:
   parser.print_usage()
   sys.exit(1)
 
-# Repeat tests multiple times. Although this way requires the binaries' lists to
-# be queried multiple time this gives fewer code paths.
-binaries *= options.repeat
-
-log = Queue.Queue()
-tests = Queue.Queue()
-
 logger = RawFormat()
 if options.format == 'raw':
   pass
@@ -104,7 +97,7 @@ else:
   sys.exit("Unknown output format: " + options.format)
 
 # Find tests.
-job_id = 0
+tests = []
 for test_binary in binaries:
   command = [test_binary]
   if options.gtest_filter != '':
@@ -127,9 +120,17 @@ for test_binary in binaries:
       continue
 
     test = test_group + line
-    tests.put((command, job_id, test))
-    log.put(str(job_id) + ': TEST ' + test_binary + ' ' + test)
-    job_id += 1
+    tests.append((test_binary, command, test))
+
+# Repeat tests (-r flag).
+tests *= options.repeat
+
+log = Queue.Queue()
+test_queue = Queue.Queue()
+
+for job_id, (test_binary, command, test) in enumerate(tests):
+  log.put(str(job_id) + ': TEST ' + test_binary + ' ' + test)
+  test_queue.put((command, job_id, test))
 
 exit_code = 0
 def run_job((command, job_id, test)):
@@ -155,8 +156,8 @@ def run_job((command, job_id, test)):
 def worker():
   while True:
     try:
-      run_job(tests.get_nowait())
-      tests.task_done()
+      run_job(test_queue.get_nowait())
+      test_queue.task_done()
     except Queue.Empty:
       return
 
