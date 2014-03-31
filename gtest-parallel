@@ -53,7 +53,7 @@ class FilterFormat:
       else:
         self.add_stdout(int(prefix[:-1]), output)
     if self.failures:
-      print "FAILED TESTS (" + str(len(self.failures)) + "):"
+      print "FAILED TESTS (%d/%d):" % (len(self.failures), self.total_tests)
       for (binary, test) in self.failures:
         print " ", binary + ": " + test
 
