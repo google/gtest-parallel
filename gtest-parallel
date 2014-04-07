@@ -1,4 +1,6 @@
 #!/usr/bin/env python2
+# Parallelization script for gtest binaries.
+# https://github.com/pbos/gtest-parallel
 import Queue
 import optparse
 import subprocess
