@@ -39,7 +39,6 @@ class FilterFormat:
       (binary, test) = arg.split(' ', 1)
       self.tests[job_id] = (binary, test.strip())
       self.outputs[job_id] = []
-      self.total_tests += 1
     elif command == "EXIT":
       (exit_code, time_ms) = [int(x) for x in arg.split(' ', 1)]
       self.finished_tests += 1
@@ -49,6 +48,8 @@ class FilterFormat:
         self.failures.append(self.tests[job_id])
         for line in self.outputs[job_id]:
           print line
+    elif command == "TESTCNT":
+      self.total_tests = int(arg.split(' ', 1)[1])
 
   def add_stdout(self, job_id, output):
     self.outputs[job_id].append(output)
@@ -141,12 +142,10 @@ tests *= options.repeat
 log = Queue.Queue()
 test_queue = Queue.Queue()
 
-for job_id, (test_binary, command, test) in enumerate(tests):
-  log.put(str(job_id) + ': TEST ' + test_binary + ' ' + test)
-  test_queue.put((command, job_id, test))
-
 exit_code = 0
 def run_job((command, job_id, test)):
+  if test == '':
+    raise Queue.Empty
   begin = time.time()
   sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
                            ['--gtest_color=' + options.gtest_color],
@@ -169,7 +168,7 @@ def run_job((command, job_id, test)):
 def worker():
   while True:
     try:
-      run_job(test_queue.get_nowait())
+      run_job(test_queue.get())
       test_queue.task_done()
     except Queue.Empty:
       return
@@ -182,6 +181,14 @@ def start_daemon(func):
 
 workers = [start_daemon(worker) for i in range(options.workers)]
 printer = start_daemon(logger.log)
+
+log.put(str(-1) + ': TESTCNT ' + ' ' + str(len(tests)))
+for job_id, (test_binary, command, test) in enumerate(tests):
+  log.put(str(job_id) + ': TEST ' + test_binary + ' ' + test)
+  test_queue.put((command, job_id, test))
+
+# Signal to tell the workers to stop.
+[test_queue.put(('', '', '')) for i in range(options.workers)]
 
 [t.join() for t in workers]
 log.put("")
