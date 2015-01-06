@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # Copyright 2013 Google Inc. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -81,7 +81,8 @@ class RawFormat:
     pass
 
 parser = optparse.OptionParser(
-    usage = 'usage: %prog [options] executable [executable ...]')
+    usage = 'usage: %prog [options] executable [test-flags]')
+parser.disable_interspersed_args()
 
 parser.add_option('-r', '--repeat', type='int', default=1,
                   help='repeat tests')
@@ -96,9 +97,9 @@ parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
 parser.add_option('--format', type='string', default='filter',
                   help='output format (raw,filter)')
 
-(options, binaries) = parser.parse_args()
+(options, args) = parser.parse_args()
 
-if binaries == []:
+if not args:
   parser.print_usage()
   sys.exit(1)
 
@@ -112,29 +113,31 @@ else:
 
 # Find tests.
 tests = []
-for test_binary in binaries:
-  command = [test_binary]
-  if options.gtest_filter != '':
-    command += ['--gtest_filter=' + options.gtest_filter]
-  if options.gtest_also_run_disabled_tests:
-    command += ['--gtest_also_run_disabled_tests']
+test_binary = args[0]
+test_flags_list = args[1:] if len(args) > 1 else []
+command = [test_binary]
+if options.gtest_filter != '':
+  command += ['--gtest_filter=' + options.gtest_filter]
+if options.gtest_also_run_disabled_tests:
+  command += ['--gtest_also_run_disabled_tests']
+if test_flags_list:
+  command += test_flags_list
 
-  test_list = subprocess.Popen(command + ['--gtest_list_tests'],
-                               stdout=subprocess.PIPE).communicate()[0]
+test_list = subprocess.Popen(command + ['--gtest_list_tests'],
+                             stdout=subprocess.PIPE).communicate()[0]
+test_group = ''
+for line in test_list.split('\n'):
+  if not line.strip():
+    continue
+  if line[0] != " ":
+    test_group = line.strip()
+    continue
+  line = line.strip()
+  if not options.gtest_also_run_disabled_tests and 'DISABLED' in line:
+    continue
 
-  test_group = ''
-  for line in test_list.split('\n'):
-    if not line.strip():
-      continue
-    if line[0] != " ":
-      test_group = line.strip()
-      continue
-    line = line.strip()
-    if not options.gtest_also_run_disabled_tests and 'DISABLED' in line:
-      continue
-
-    test = test_group + line
-    tests.append((test_binary, command, test))
+  test = test_group + line
+  tests.append((test_binary, command, test))
 
 # Repeat tests (-r flag).
 tests *= options.repeat
