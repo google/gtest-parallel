@@ -86,7 +86,7 @@ additional_args = []
 for i in range(len(sys.argv)):
   if sys.argv[i] == '--':
     additional_args = sys.argv[i+1:]
-    sys.argv = sys.argv[:i-1]
+    sys.argv = sys.argv[:i]
     break
 
 parser = optparse.OptionParser(
