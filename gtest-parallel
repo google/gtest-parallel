@@ -90,7 +90,7 @@ for i in range(len(sys.argv)):
     break
 
 parser = optparse.OptionParser(
-    usage = 'usage: %prog [options] executable [executable ...] -- [additional arguments]')
+    usage = 'usage: %prog [options] binary [binary ...] -- [additional args]')
 
 parser.add_option('-r', '--repeat', type='int', default=1,
                   help='repeat tests')
