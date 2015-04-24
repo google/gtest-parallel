@@ -128,9 +128,11 @@ for test_binary in binaries:
   if options.gtest_also_run_disabled_tests:
     command += ['--gtest_also_run_disabled_tests']
 
-  test_list = subprocess.Popen(command +
-                               ['--gtest_filter=' + options.gtest_filter] +
-                               ['--gtest_list_tests'],
+  list_command = list(command)
+  if options.gtest_filter != '':
+    list_command += ['--gtest_filter=' + options.gtest_filter]
+
+  test_list = subprocess.Popen(list_command + ['--gtest_list_tests'],
                                stdout=subprocess.PIPE).communicate()[0]
 
   command += additional_args
