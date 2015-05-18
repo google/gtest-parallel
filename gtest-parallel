@@ -14,6 +14,7 @@
 # limitations under the License.
 import cPickle
 import gzip
+import multiprocessing
 import optparse
 import os
 import subprocess
@@ -146,7 +147,8 @@ parser = optparse.OptionParser(
 
 parser.add_option('-r', '--repeat', type='int', default=1,
                   help='repeat tests')
-parser.add_option('-w', '--workers', type='int', default=16,
+parser.add_option('-w', '--workers', type='int',
+                  default=multiprocessing.cpu_count(),
                   help='number of workers to spawn')
 parser.add_option('--gtest_color', type='string', default='yes',
                   help='color output')
