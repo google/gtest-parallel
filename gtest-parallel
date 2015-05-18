@@ -132,8 +132,11 @@ for test_binary in binaries:
   if options.gtest_filter != '':
     list_command += ['--gtest_filter=' + options.gtest_filter]
 
-  test_list = subprocess.Popen(list_command + ['--gtest_list_tests'],
-                               stdout=subprocess.PIPE).communicate()[0]
+  try:
+    test_list = subprocess.Popen(list_command + ['--gtest_list_tests'],
+                                 stdout=subprocess.PIPE).communicate()[0]
+  except OSError as e:
+    sys.exit("%s: %s" % (test_binary, str(e)))
 
   command += additional_args
 
