@@ -221,7 +221,10 @@ logger.log(str(-1) + ': TESTCNT ' + ' ' + str(len(tests)))
 
 exit_code = 0
 
-# Run the specified job. Returns the elapsed time in milliseconds.
+# Run the specified job. Return the elapsed time in milliseconds if
+# the job succeeds, or a very large number (larger than any reasonable
+# elapsed time) if the job fails. (This ensures that failing tests
+# will run first the next time.)
 def run_job((command, job_id, test)):
   begin = time.time()
   sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
@@ -238,10 +241,11 @@ def run_job((command, job_id, test)):
   code = sub.wait()
   runtime_ms = int(1000 * (time.time() - begin))
   logger.log("%s: EXIT %s %d" % (job_id, code, runtime_ms))
-  if code != 0:
-    global exit_code
-    exit_code = code
-  return runtime_ms
+  if code == 0:
+    return runtime_ms
+  global exit_code
+  exit_code = code
+  return sys.maxint
 
 def worker():
   global job_id
