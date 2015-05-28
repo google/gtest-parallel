@@ -149,17 +149,19 @@ class TestTimes(object):
       return
     for ((test_binary, test_name), runtime) in times.items():
       if (type(test_binary) is not str or type(test_name) is not str
-          or type(runtime) not in {int, long}):
+          or type(runtime) not in {int, long, type(None)}):
         return
 
     self.__times = times
 
   def get_test_time(self, binary, testname):
-    "Return the last duration for the given test, or 0 if there's no record."
+    """Return the last duration for the given test (which can be None
+    if the test failed), or 0 if there's no record."""
     return self.__times.get((binary, testname), 0)
 
   def record_test_time(self, binary, testname, runtime_ms):
-    "Record that the given test ran in the specified number of milliseconds."
+    """Record that the given test ran in the specified number of
+    milliseconds. If the test failed, runtime_ms should be None."""
     with self.__lock:
       self.__times[(binary, testname)] = runtime_ms
 
@@ -197,6 +199,8 @@ parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
                   default=False, help='run disabled tests too')
 parser.add_option('--format', type='string', default='filter',
                   help='output format (raw,filter)')
+parser.add_option('--print_test_times', action='store_true', default=False,
+                  help='When done, list the run time of each test')
 
 (options, binaries) = parser.parse_args()
 
@@ -250,7 +254,10 @@ for test_binary in binaries:
     test = test_group + line
     tests.append((times.get_test_time(test_binary, test),
                   test_binary, test, command))
-tests.sort(reverse=True)
+
+# Sort tests by falling runtime (with None, which is what's recorded
+# for failing tests, being considered larger than any real runtime).
+tests.sort(reverse=True, key=lambda x: ((1 if x[0] is None else 0), x))
 
 # Repeat tests (-r flag).
 tests *= options.repeat
@@ -261,9 +268,8 @@ logger.log(str(-1) + ': TESTCNT ' + ' ' + str(len(tests)))
 exit_code = 0
 
 # Run the specified job. Return the elapsed time in milliseconds if
-# the job succeeds, or a very large number (larger than any reasonable
-# elapsed time) if the job fails. (This ensures that failing tests
-# will run first the next time.)
+# the job succeeds, or None if the job fails. (This ensures that
+# failing tests will run first the next time.)
 def run_job((command, job_id, test)):
   begin = time.time()
   sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
@@ -284,7 +290,7 @@ def run_job((command, job_id, test)):
     return runtime_ms
   global exit_code
   exit_code = code
-  return sys.maxint
+  return None
 
 def worker():
   global job_id
@@ -312,4 +318,10 @@ workers = [start_daemon(worker) for i in range(options.workers)]
 [t.join() for t in workers]
 logger.end()
 times.write_to_file(save_file)
+if options.print_test_times:
+  ts = sorted((times.get_test_time(test_binary, test), test_binary, test)
+              for (_, test_binary, test, _) in tests
+              if times.get_test_time(test_binary, test) is not None)
+  for (time_ms, test_binary, test) in ts:
+    print "%8s %s" % ("%dms" % time_ms, test)
 sys.exit(exit_code)
