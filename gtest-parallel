@@ -155,9 +155,9 @@ class TestTimes(object):
     self.__times = times
 
   def get_test_time(self, binary, testname):
-    """Return the last duration for the given test (which can be None
-    if the test failed), or 0 if there's no record."""
-    return self.__times.get((binary, testname), 0)
+    """Return the last duration for the given test as an integer number of
+    milliseconds, or None if the test failed or if there's no record for it."""
+    return self.__times.get((binary, testname), None)
 
   def record_test_time(self, binary, testname, runtime_ms):
     """Record that the given test ran in the specified number of
@@ -255,8 +255,9 @@ for test_binary in binaries:
     tests.append((times.get_test_time(test_binary, test),
                   test_binary, test, command))
 
-# Sort tests by falling runtime (with None, which is what's recorded
-# for failing tests, being considered larger than any real runtime).
+# Sort tests by falling runtime (with None, which is what we get for
+# new and failing tests, being considered larger than any real
+# runtime).
 tests.sort(reverse=True, key=lambda x: ((1 if x[0] is None else 0), x))
 
 # Repeat tests (-r flag).
