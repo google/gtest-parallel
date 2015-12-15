@@ -38,6 +38,9 @@ import zlib
 # wait(p) will call p.terminate() and raise ProcessWasInterrupted.
 class SigintHandler(object):
   class ProcessWasInterrupted(Exception): pass
+  sigint_returncodes = {-signal.SIGINT,  # Unix
+                        -1073741510,     # Windows
+                        }
   def __init__(self):
     self.__lock = threading.Lock()
     self.__processes = set()
@@ -64,7 +67,7 @@ class SigintHandler(object):
     code = p.wait()
     with self.__lock:
       self.__processes.discard(p)
-      if code == -signal.SIGINT:
+      if code in self.sigint_returncodes:
         self.__on_sigint()
       if self.__got_sigint:
         raise self.ProcessWasInterrupted
