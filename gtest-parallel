@@ -305,7 +305,8 @@ for test_binary in binaries:
     if not line.strip():
       continue
     if line[0] != " ":
-      test_group = line.strip()
+      # Remove comments for typed tests and strip whitespace.
+      test_group = line.split('#')[0].strip()
       continue
     # Remove comments for parameterized tests and strip whitespace.
     line = line.split('#')[0].strip()
