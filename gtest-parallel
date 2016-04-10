@@ -128,6 +128,16 @@ class FilterFormat:
   failures = []
 
   def print_test_status(self, last_finished_test, time_ms):
+    # Determine usable line width.
+    screen_width = sys.maxsize
+    with os.popen('stty size', 'r') as p:
+      try:
+        screen_width = int(p.read().split()[1])
+      except:
+        pass
+
+    if len(last_finished_test) > screen_width:
+      last_finished_test = last_finished_test[:screen_width - 25] + '...'
     self.out.transient_line("[%d/%d] %s (%d ms)"
                             % (self.finished_tests, self.total_tests,
                                last_finished_test, time_ms))
