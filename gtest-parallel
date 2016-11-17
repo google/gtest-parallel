@@ -294,7 +294,8 @@ if options.shard_count < 1:
   parser.error("Invalid number of shards: %d. Must be at least 1." %
                options.shard_count)
 if not (0 <= options.shard_index < options.shard_count):
-  parser.error("Invalid shard index: %d. Must be between 0 and %d." %
+  parser.error("Invalid shard index: %d. Must be between 0 and %d "
+               "(less than the number of shards)." %
                (options.shard_index, options.shard_count - 1))
 
 # Find tests.
