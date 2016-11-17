@@ -338,6 +338,9 @@ for test_binary in binaries:
     tests.append((times.get_test_time(test_binary, test),
                   test_binary, test, command))
 
+# GTEST_SHARD_INDEX and GTEST_TOTAL_SHARDS must be removed from the environment
+# otherwise it will be picked up by the binary, causing a bug where only tests
+# in the firsh shard are executed.
 test_env = os.environ.copy()
 test_env.pop('GTEST_SHARD_INDEX', None)
 test_env.pop('GTEST_TOTAL_SHARDS', None)
