@@ -267,11 +267,11 @@ parser.add_option('--format', type='string', default='filter',
 parser.add_option('--print_test_times', action='store_true', default=False,
                   help='When done, list the run time of each test')
 parser.add_option('--shard_count', type='int',
-                  default=int(os.environ.pop('GTEST_TOTAL_SHARDS', 1)),
+                  default=int(os.environ.get('GTEST_TOTAL_SHARDS', 1)),
                   help=('Total number of shards (for sharding test execution '
                         'between multiple machines). Default: %default'))
 parser.add_option('--shard_index', type='int',
-                  default=int(os.environ.pop('GTEST_SHARD_INDEX', 0)),
+                  default=int(os.environ.get('GTEST_SHARD_INDEX', 0)),
                   help=('Zero-indexed number identifying this shard (for '
                         'sharding test execution between multiple machines). '
                         'Default: %default'))
@@ -288,15 +288,14 @@ if options.format == 'raw':
 elif options.format == 'filter':
   logger = FilterFormat()
 else:
-  sys.exit("Unknown output format: " + options.format)
+  parser.error("Unknown output format: " + options.format)
 
 if options.shard_count < 1:
-  sys.exit("Invalid number of shards: %d. Must be at least 1." %
-           options.shard_count)
-if options.shard_index < 0 or options.shard_count <= options.shard_index:
-  sys.exit("Invalid shard index: %d. Must be between 0 and %d." %
-           (options.shard_index, options.shard_count - 1))
-
+  parser.error("Invalid number of shards: %d. Must be at least 1." %
+               options.shard_count)
+if not (0 <= options.shard_index < options.shard_count):
+  parser.error("Invalid shard index: %d. Must be between 0 and %d." %
+               (options.shard_index, options.shard_count - 1))
 
 # Find tests.
 save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
@@ -338,6 +337,9 @@ for test_binary in binaries:
     tests.append((times.get_test_time(test_binary, test),
                   test_binary, test, command))
 
+test_env = os.environ.copy()
+test_env.pop('GTEST_SHARD_INDEX', None)
+test_env.pop('GTEST_TOTAL_SHARDS', None)
 tests = tests[options.shard_index::options.shard_count]
 
 if options.failed:
@@ -379,6 +381,7 @@ def run_job((command, job_id, test)):
   with tempfile.NamedTemporaryFile(dir=options.output_dir, delete=False) as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
                              ['--gtest_color=' + options.gtest_color],
+                           env=test_env,
                            stdout=log.file,
                            stderr=log.file)
     try:
