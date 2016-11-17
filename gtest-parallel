@@ -265,12 +265,12 @@ parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
 parser.add_option('--format', type='string', default='filter',
                   help='output format (raw,filter)')
 parser.add_option('--print_test_times', action='store_true', default=False,
-                  help='List the run time of each test at the end of execution')
+                  help='list the run time of each test at the end of execution')
 parser.add_option('--shard_count', type='int', default=1,
-                  help='Total number of shards (for sharding test execution '
+                  help='total number of shards (for sharding test execution '
                        'between multiple machines)')
 parser.add_option('--shard_index', type='int', default=0,
-                  help='Zero-indexed number identifying this shard (for '
+                  help='zero-indexed number identifying this shard (for '
                        'sharding test execution between multiple machines)')
 
 (options, binaries) = parser.parse_args()
