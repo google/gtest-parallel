@@ -266,12 +266,10 @@ parser.add_option('--format', type='string', default='filter',
                   help='output format (raw,filter)')
 parser.add_option('--print_test_times', action='store_true', default=False,
                   help='When done, list the run time of each test')
-parser.add_option('--shard_count', type='int',
-                  default=int(os.environ.get('GTEST_TOTAL_SHARDS', 1)),
+parser.add_option('--shard_count', type='int', default=1,
                   help=('Total number of shards (for sharding test execution '
                         'between multiple machines). Default: %default'))
-parser.add_option('--shard_index', type='int',
-                  default=int(os.environ.get('GTEST_SHARD_INDEX', 0)),
+parser.add_option('--shard_index', type='int', default=0,
                   help=('Zero-indexed number identifying this shard (for '
                         'sharding test execution between multiple machines). '
                         'Default: %default'))
@@ -338,12 +336,6 @@ for test_binary in binaries:
     tests.append((times.get_test_time(test_binary, test),
                   test_binary, test, command))
 
-# GTEST_SHARD_INDEX and GTEST_TOTAL_SHARDS must be removed from the environment
-# otherwise it will be picked up by the binary, causing a bug where only tests
-# in the firsh shard are executed.
-test_env = os.environ.copy()
-test_env.pop('GTEST_SHARD_INDEX', None)
-test_env.pop('GTEST_TOTAL_SHARDS', None)
 tests = tests[options.shard_index::options.shard_count]
 
 if options.failed:
@@ -385,7 +377,6 @@ def run_job((command, job_id, test)):
   with tempfile.NamedTemporaryFile(dir=options.output_dir, delete=False) as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
                              ['--gtest_color=' + options.gtest_color],
-                           env=test_env,
                            stdout=log.file,
                            stderr=log.file)
     try:
