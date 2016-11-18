@@ -265,7 +265,13 @@ parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
 parser.add_option('--format', type='string', default='filter',
                   help='output format (raw,filter)')
 parser.add_option('--print_test_times', action='store_true', default=False,
-                  help='When done, list the run time of each test')
+                  help='list the run time of each test at the end of execution')
+parser.add_option('--shard_count', type='int', default=1,
+                  help='total number of shards (for sharding test execution '
+                       'between multiple machines)')
+parser.add_option('--shard_index', type='int', default=0,
+                  help='zero-indexed number identifying this shard (for '
+                       'sharding test execution between multiple machines)')
 
 (options, binaries) = parser.parse_args()
 
@@ -279,7 +285,15 @@ if options.format == 'raw':
 elif options.format == 'filter':
   logger = FilterFormat()
 else:
-  sys.exit("Unknown output format: " + options.format)
+  parser.error("Unknown output format: " + options.format)
+
+if options.shard_count < 1:
+  parser.error("Invalid number of shards: %d. Must be at least 1." %
+               options.shard_count)
+if not (0 <= options.shard_index < options.shard_count):
+  parser.error("Invalid shard index: %d. Must be between 0 and %d "
+               "(less than the number of shards)." %
+               (options.shard_index, options.shard_count - 1))
 
 # Find tests.
 save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
@@ -320,6 +334,8 @@ for test_binary in binaries:
       continue
     tests.append((times.get_test_time(test_binary, test),
                   test_binary, test, command))
+
+tests = tests[options.shard_index::options.shard_count]
 
 if options.failed:
   # The first element of each entry is the runtime of the most recent
