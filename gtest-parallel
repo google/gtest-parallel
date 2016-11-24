@@ -253,6 +253,8 @@ parser.add_option('-r', '--repeat', type='int', default=1,
                   help='repeat tests')
 parser.add_option('--failed', action='store_true', default=False,
                   help='run only failed and new tests')
+parser.add_option('--group_tests', action='store_true', default=False,
+                  help='run test in groups and not as individuals')
 parser.add_option('-w', '--workers', type='int',
                   default=multiprocessing.cpu_count(),
                   help='number of workers to spawn')
@@ -323,12 +325,23 @@ for test_binary in binaries:
     if line[0] != " ":
       # Remove comments for typed tests and strip whitespace.
       test_group = line.split('#')[0].strip()
+      # add groups as tests to test list
+      if options.group_tests:
+        if not test_group.endswith("."):
+          continue
+        if " " in test_group:
+          continue
+        test_group = test_group + "*"
+        tests.append((times.get_test_time(test_binary, test_group),
+                  test_binary, test_group, command))
       continue
     # Remove comments for parameterized tests and strip whitespace.
     line = line.split('#')[0].strip()
     if not line:
       continue
-
+    # Don't add tests if in grouptest mode
+    if options.group_tests:
+      continue
     test = test_group + line
     if not options.gtest_also_run_disabled_tests and 'DISABLED_' in test:
       continue
