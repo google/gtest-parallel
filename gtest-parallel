@@ -220,6 +220,8 @@ class CollectTestResults(object):
 class IgnoreTestResults(object):
   def log(self, test, result):
     pass
+  def dump_to_file_and_close(self):
+    pass
 
 # Record of test runtimes. Has built-in locking.
 class TestTimes(object):
@@ -334,9 +336,8 @@ if not (0 <= options.shard_index < options.shard_count):
                "(less than the number of shards)." %
                (options.shard_index, options.shard_count - 1))
 
-test_results = IgnoreTestResults()
-if options.dump_json_test_results:
-  test_results = CollectTestResults(options.dump_json_test_results)
+test_results = (IgnoreTestResults() if options.dump_json_test_results is None
+                else CollectTestResults(options.dump_json_test_results))
 
 # Find tests.
 save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
@@ -472,6 +473,5 @@ if options.print_test_times:
               if times.get_test_time(test_binary, test) is not None)
   for (time_ms, test_binary, test) in ts:
     print "%8s %s" % ("%dms" % time_ms, test)
-if options.dump_json_test_results:
-  test_results.dump_to_file_and_close()
+test_results.dump_to_file_and_close()
 sys.exit(-signal.SIGINT if sigint_handler.got_sigint() else exit_code)
