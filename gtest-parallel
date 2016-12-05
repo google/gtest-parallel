@@ -473,5 +473,6 @@ if options.print_test_times:
               if times.get_test_time(test_binary, test) is not None)
   for (time_ms, test_binary, test) in ts:
     print "%8s %s" % ("%dms" % time_ms, test)
+
 test_results.dump_to_file_and_close()
 sys.exit(-signal.SIGINT if sigint_handler.got_sigint() else exit_code)
