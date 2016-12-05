@@ -188,8 +188,9 @@ class RawFormat:
     pass
 
 class CollectTestResults(object):
-  def __init__(self):
+  def __init__(self, json_dump_filepath):
     self.test_results_lock = threading.Lock()
+    self.json_dump_file = open(json_dump_filepath, 'w')
     self.test_results = {
         "interrupted": False,
         "path_delimiter": ".",
@@ -212,9 +213,9 @@ class CollectTestResults(object):
         results = results.setdefault(name, {})
       results.update(result)
 
-  def dump_to_file(self, json_dump_filepath):
-    with open(json_dump_filepath, 'w') as json_dump_file:
-      json.dump(self.test_results, json_dump_file)
+  def dump_to_file_and_close(self):
+    json.dump(self.test_results, self.json_dump_file)
+    self.json_dump_file.close()
 
 class IgnoreTestResults(object):
   def log(self, test, result):
@@ -333,8 +334,9 @@ if not (0 <= options.shard_index < options.shard_count):
                "(less than the number of shards)." %
                (options.shard_index, options.shard_count - 1))
 
-test_results = (CollectTestResults() if options.dump_json_test_results
-                else IgnoreTestResults())
+test_results = IgnoreTestResults()
+if options.dump_json_test_results:
+  test_results = CollectTestResults(options.dump_json_test_results)
 
 # Find tests.
 save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
@@ -471,5 +473,5 @@ if options.print_test_times:
   for (time_ms, test_binary, test) in ts:
     print "%8s %s" % ("%dms" % time_ms, test)
 if options.dump_json_test_results:
-  test_results.dump_to_file(options.dump_json_test_results)
+  test_results.dump_to_file_and_close()
 sys.exit(-signal.SIGINT if sigint_handler.got_sigint() else exit_code)
