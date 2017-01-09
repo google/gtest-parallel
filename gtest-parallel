@@ -190,9 +190,15 @@ class RawFormat:
 class CollectTestResults(object):
   def __init__(self, json_dump_filepath):
     self.test_results_lock = threading.Lock()
-    self.json_dump_file = open(json_dump_filepath, 'w')
+    self.expected_num_tests = -1
+    self.total_num_tests = 0
+    self.json_dump_filepath = json_dump_filepath
+
+    # Write a minimal JSON file with the 'interrupted' key set to true in case
+    # the execution is interrupted.
+    self.json_dump_file = open(self.json_dump_filepath, 'w')
     self.test_results = {
-        "interrupted": False,
+        "interrupted": True,
         "path_delimiter": ".",
         # Third version of the file format. See the link in the flag description
         # for details.
@@ -204,9 +210,16 @@ class CollectTestResults(object):
         },
         "tests": {},
     }
+    json.dump(self.test_results, self.json_dump_file)
+    self.json_dump_file.flush()
+    os.fsync(self.json_dump_file.fileno())
+
+  def set_expected_num_tests(self, expected_num_tests):
+    self.expected_num_tests = expected_num_tests
 
   def log(self, test, result):
     with self.test_results_lock:
+      self.total_num_tests += 1
       self.test_results['num_failures_by_type'][result['actual']] += 1
       results = self.test_results['tests']
       for name in test.split('.'):
@@ -214,11 +227,19 @@ class CollectTestResults(object):
       results.update(result)
 
   def dump_to_file_and_close(self):
+    # Clear the previously written JSON file.
+    self.json_dump_file.truncate(0)
+    self.json_dump_file.seek(0)
+
+    if self.expected_num_tests == self.total_num_tests:
+      self.test_results['interrupted'] = False
     json.dump(self.test_results, self.json_dump_file)
     self.json_dump_file.close()
 
 class IgnoreTestResults(object):
   def log(self, test, result):
+    pass
+  def set_expected_num_tests(self, expected_num_tests):
     pass
   def dump_to_file_and_close(self):
     pass
@@ -380,6 +401,7 @@ for test_binary in binaries:
                   test_binary, test, command))
 
 tests = tests[options.shard_index::options.shard_count]
+test_results.set_expected_num_tests(len(tests))
 
 if options.failed:
   # The first element of each entry is the runtime of the most recent
