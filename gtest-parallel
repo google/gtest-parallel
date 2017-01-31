@@ -418,17 +418,19 @@ for logfile in os.listdir(options.output_dir):
 def run_job((command, job_id, test)):
   begin = time.time()
 
-  log_filename = os.path.join(options.output_dir, re.sub(r'\W', '_', test))
-  with open(log_filename, 'w') as log:
+  test_name = re.sub(r'\W', '_', test) + '__'
+  with tempfile.NamedTemporaryFile(dir=options.output_dir, delete=False,
+                                   prefix=test_name) as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
-                           ['--gtest_color=' + options.gtest_color],
-                           stdout=log, stderr=log)
+                             ['--gtest_color=' + options.gtest_color],
+                           stdout=log.file,
+                           stderr=log.file)
     try:
       code = sigint_handler.wait(sub)
     except sigint_handler.ProcessWasInterrupted:
       thread.exit()
     runtime_ms = int(1000 * (time.time() - begin))
-    logger.logfile(job_id, log_filename)
+    logger.logfile(job_id, log.name)
 
   test_results.log(test, {
       "expected": "PASS",
