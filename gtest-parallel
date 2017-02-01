@@ -394,7 +394,9 @@ if options.failed:
 tests.sort(reverse=True, key=lambda x: ((1 if x[0] is None else 0), x))
 
 # Repeat tests (-r flag).
+indices = [str(i/len(tests) + 1) for i in range(options.repeat * len(tests))]
 tests *= options.repeat
+tests = zip(tests, indices)
 test_lock = threading.Lock()
 job_id = 0
 logger.log(str(-1) + ': TESTCNT ' + ' ' + str(len(tests)))
@@ -415,16 +417,14 @@ for logfile in os.listdir(options.output_dir):
 # Run the specified job. Return the elapsed time in milliseconds if
 # the job succeeds, or None if the job fails. (This ensures that
 # failing tests will run first the next time.)
-def run_job((command, job_id, test)):
+def run_job((command, job_id, test, test_index)):
   begin = time.time()
 
-  test_name = re.sub(r'\W', '_', test) + '__'
-  with tempfile.NamedTemporaryFile(dir=options.output_dir, delete=False,
-                                   prefix=test_name) as log:
+  test_name = re.sub(r'\W', '_', test) + '-' + test_index + '.log'
+  with open(os.path.join(options.output_dir, test_name), 'w') as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
                              ['--gtest_color=' + options.gtest_color],
-                           stdout=log.file,
-                           stderr=log.file)
+                           stdout=log, stderr=log)
     try:
       code = sigint_handler.wait(sub)
     except sigint_handler.ProcessWasInterrupted:
@@ -450,9 +450,9 @@ def worker():
     job = None
     test_lock.acquire()
     if job_id < len(tests):
-      (_, test_binary, test, command) = tests[job_id]
+      (_, test_binary, test, command), test_index = tests[job_id]
       logger.log(str(job_id) + ': TEST ' + test_binary + ' ' + test)
-      job = (command, job_id, test)
+      job = (command, job_id, test, test_index)
     job_id += 1
     test_lock.release()
     if job is None:
