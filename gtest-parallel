@@ -15,6 +15,7 @@
 import cPickle
 import errno
 import gzip
+import itertools
 import json
 import multiprocessing
 import optparse
@@ -394,9 +395,7 @@ if options.failed:
 tests.sort(reverse=True, key=lambda x: ((1 if x[0] is None else 0), x))
 
 # Repeat tests (-r flag).
-indices = [str(i/len(tests) + 1) for i in range(options.repeat * len(tests))]
-tests *= options.repeat
-tests = zip(tests, indices)
+tests = list(itertools.product(tests, range(1, options.repeat + 1)))
 test_lock = threading.Lock()
 job_id = 0
 logger.log(str(-1) + ': TESTCNT ' + ' ' + str(len(tests)))
@@ -420,7 +419,7 @@ for logfile in os.listdir(options.output_dir):
 def run_job((command, job_id, test, test_index)):
   begin = time.time()
 
-  test_name = re.sub(r'\W', '_', test) + '-' + test_index + '.log'
+  test_name = re.sub(r'\W', '_', test) + '-' + str(test_index) + '.log'
   with open(os.path.join(options.output_dir, test_name), 'w') as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
                              ['--gtest_color=' + options.gtest_color],
