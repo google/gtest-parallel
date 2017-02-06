@@ -15,7 +15,6 @@
 import cPickle
 import errno
 import gzip
-import itertools
 import json
 import multiprocessing
 import optparse
