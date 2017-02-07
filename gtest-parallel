@@ -47,7 +47,7 @@ class SigintHandler(object):
     self.__lock = threading.Lock()
     self.__processes = set()
     self.__got_sigint = False
-    signal.signal(signal.SIGINT, self.__sigint_handler)
+    signal.signal(signal.SIGINT, lambda signal_num, frame: self.interrupt())
   def __on_sigint(self):
     self.__got_sigint = True
     while self.__processes:
@@ -55,7 +55,7 @@ class SigintHandler(object):
         self.__processes.pop().terminate()
       except OSError:
         pass
-  def __sigint_handler(self, signal_num, frame):
+  def interrupt(self):
     with self.__lock:
       self.__on_sigint()
   def got_sigint(self):
@@ -127,7 +127,17 @@ class FilterFormat:
 
   tests = {}
   outputs = {}
+  started = []
+  finished = []
   failures = []
+
+  def print_tests(self, message, test_ids):
+    if test_ids:
+      self.out.permanent_line("%s (%s/%s):" %
+                              (message, len(test_ids), self.total_tests))
+      test_ids = sorted(test_ids, key=lambda test_id: self.tests[test_id])
+      for test_id in test_ids:
+        self.out.permanent_line(" %s: %s" % self.tests[test_id])
 
   def print_test_status(self, last_finished_test, time_ms):
     self.out.transient_line("[%d/%d] %s (%d ms)"
@@ -139,13 +149,16 @@ class FilterFormat:
     if command == "TEST":
       (binary, test) = arg.split(' ', 1)
       self.tests[job_id] = (binary, test.strip())
+    elif command == "START":
+      self.started.append(job_id)
     elif command == "EXIT":
       (exit_code, time_ms) = [int(x) for x in arg.split(' ', 1)]
       self.finished_tests += 1
+      self.finished.append(job_id)
       (binary, test) = self.tests[job_id]
       self.print_test_status(test, time_ms)
       if exit_code != 0:
-        self.failures.append(self.tests[job_id])
+        self.failures.append(job_id)
         with open(self.outputs[job_id]) as f:
           for line in f.readlines():
             self.out.permanent_line(line.rstrip())
@@ -168,11 +181,9 @@ class FilterFormat:
     stdout_lock.release()
 
   def end(self):
-    if self.failures:
-      self.out.permanent_line("FAILED TESTS (%d/%d):"
-                              % (len(self.failures), self.total_tests))
-      for (binary, test) in self.failures:
-        self.out.permanent_line(" " + binary + ": " + test)
+    self.print_tests("FAILED TESTS", self.failures)
+    interruptions = set(self.started) - set(self.finished)
+    self.print_tests("INTERRUPTED TESTS", interruptions)
     self.out.flush_transient_output()
 
 class RawFormat:
@@ -222,6 +233,12 @@ class IgnoreTestResults(object):
   def log(self, test, result):
     pass
   def dump_to_file_and_close(self):
+    pass
+
+class DummyTimer(object):
+  def start(self):
+    pass
+  def cancel(self):
     pass
 
 # Record of test runtimes. Has built-in locking.
@@ -314,6 +331,9 @@ parser.add_option('--dump_json_test_results', type='string', default=None,
                   help='Saves the results of the tests as a JSON machine-'
                        'readable file. The format of the file is specified at '
                        'https://www.chromium.org/developers/the-json-test-results-format')
+parser.add_option('--timeout', type='int', default=None,
+                  help='Interrupt all remaining processes after the given '
+                       'time (in seconds).')
 
 (options, binaries) = parser.parse_args()
 
@@ -336,6 +356,9 @@ if not (0 <= options.shard_index < options.shard_count):
   parser.error("Invalid shard index: %d. Must be between 0 and %d "
                "(less than the number of shards)." %
                (options.shard_index, options.shard_count - 1))
+
+timeout = (DummyTimer() if options.timeout is None
+           else threading.Timer(options.timeout, sigint_handler.interrupt))
 
 test_results = (IgnoreTestResults() if options.dump_json_test_results is None
                 else CollectTestResults(options.dump_json_test_results))
@@ -418,6 +441,7 @@ for logfile in os.listdir(options.output_dir):
 def run_job((command, job_id, test, test_index)):
   begin = time.time()
 
+  logger.log("%s: START " % job_id)
   test_name = re.sub('[^A-Za-z0-9]', '_', test) + '-' + str(test_index) + '.log'
   with open(os.path.join(options.output_dir, test_name), 'w') as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
@@ -463,9 +487,13 @@ def start_daemon(func):
   t.start()
   return t
 
-workers = [start_daemon(worker) for i in range(options.workers)]
+try:
+  timeout.start()
+  workers = [start_daemon(worker) for i in range(options.workers)]
+  [t.join() for t in workers]
+finally:
+  timeout.cancel()
 
-[t.join() for t in workers]
 logger.end()
 times.write_to_file(save_file)
 if options.print_test_times:
