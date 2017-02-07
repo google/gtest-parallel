@@ -47,7 +47,7 @@ class SigintHandler(object):
     self.__lock = threading.Lock()
     self.__processes = set()
     self.__got_sigint = False
-    signal.signal(signal.SIGINT, self.__sigint_handler)
+    signal.signal(signal.SIGINT, lambda signal_num, frame: self.interrupt())
   def __on_sigint(self):
     self.__got_sigint = True
     while self.__processes:
@@ -55,9 +55,6 @@ class SigintHandler(object):
         self.__processes.pop().terminate()
       except OSError:
         pass
-  def __sigint_handler(self, signal_num, frame):
-    with self.__lock:
-      self.__on_sigint()
   def interrupt(self):
     with self.__lock:
       self.__on_sigint()
@@ -138,6 +135,7 @@ class FilterFormat:
     if test_ids:
       self.out.permanent_line("%s (%s/%s):" %
                               (message, len(test_ids), self.total_tests))
+      test_ids = sorted(test_ids, key=lambda test_id: self.tests[test_id])
       for test_id in test_ids:
         self.out.permanent_line(" %s: %s" % self.tests[test_id])
 
@@ -184,7 +182,7 @@ class FilterFormat:
 
   def end(self):
     self.print_tests("FAILED TESTS", self.failures)
-    interruptions = set(self.started).difference(set(self.finished))
+    interruptions = set(self.started) - set(self.finished)
     self.print_tests("INTERRUPTED TESTS", interruptions)
     self.out.flush_transient_output()
 
@@ -291,7 +289,6 @@ class TestTimes(object):
     except IOError:
       pass  # ignore errors---saving the times isn't that important
 
-
 # Remove additional arguments (anything after --).
 additional_args = []
 
@@ -335,8 +332,8 @@ parser.add_option('--dump_json_test_results', type='string', default=None,
                        'readable file. The format of the file is specified at '
                        'https://www.chromium.org/developers/the-json-test-results-format')
 parser.add_option('--timeout', type='int', default=None,
-                  help='Interrupt all remaining processes after a given '
-                       'timeout.')
+                  help='Interrupt all remaining processes after the given '
+                       'time (in seconds).')
 
 (options, binaries) = parser.parse_args()
 
@@ -490,10 +487,9 @@ def start_daemon(func):
   t.start()
   return t
 
-workers = [start_daemon(worker) for i in range(options.workers)]
-
 try:
   timeout.start()
+  workers = [start_daemon(worker) for i in range(options.workers)]
   [t.join() for t in workers]
 finally:
   timeout.cancel()
