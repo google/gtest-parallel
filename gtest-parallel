@@ -28,6 +28,7 @@ import thread
 import threading
 import time
 import zlib
+import zipfile
 
 # An object that catches SIGINT sent to the Python process and notices
 # if processes passed to wait() die by SIGINT (we need to look for
@@ -127,9 +128,10 @@ class FilterFormat:
 
   tests = {}
   outputs = {}
+  passed = []
   started = []
-  finished = []
   failures = []
+  finished = []
 
   def print_tests(self, message, test_ids):
     if test_ids:
@@ -157,7 +159,9 @@ class FilterFormat:
       self.finished.append(job_id)
       (binary, test) = self.tests[job_id]
       self.print_test_status(test, time_ms)
-      if exit_code != 0:
+      if exit_code == 0:
+        self.passed.append(job_id)
+      else:
         self.failures.append(job_id)
         with open(self.outputs[job_id]) as f:
           for line in f.readlines():
@@ -185,6 +189,11 @@ class FilterFormat:
     interruptions = set(self.started) - set(self.finished)
     self.print_tests("INTERRUPTED TESTS", interruptions)
     self.out.flush_transient_output()
+
+    with zipfile.ZipFile(self.zip_file, 'w') as logs_zip:
+      for passing in self.passed:
+        logs_zip.write(self.outputs[passing])
+        os.remove(self.outputs[passing])
 
 class RawFormat:
   def log(self, line):
@@ -346,6 +355,7 @@ if options.format == 'raw':
   pass
 elif options.format == 'filter':
   logger = FilterFormat()
+  logger.zip_file = os.path.join(options.output_dir, 'passing_test_logs.zip')
 else:
   parser.error("Unknown output format: " + options.format)
 
