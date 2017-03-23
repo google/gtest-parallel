@@ -27,8 +27,8 @@ import tempfile
 import thread
 import threading
 import time
-import zlib
 import zipfile
+import zlib
 
 # An object that catches SIGINT sent to the Python process and notices
 # if processes passed to wait() die by SIGINT (we need to look for
@@ -189,6 +189,9 @@ class FilterFormat:
     interruptions = set(self.started) - set(self.finished)
     self.print_tests("INTERRUPTED TESTS", interruptions)
     self.out.flush_transient_output()
+
+    if not self.passed:
+      return
 
     with zipfile.ZipFile(self.zip_file, 'w') as logs_zip:
       for passing in self.passed:
