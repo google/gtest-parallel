@@ -150,33 +150,32 @@ class FilterFormat:
                                last_finished_test, time_ms))
 
   def log(self, job_id, command, args=tuple(), file_name=None):
-    stdout_lock.acquire()
-    if command == "TEST":
-      self.tests[job_id] = args
-    elif command == "START":
-      self.started.add(job_id)
-    elif command == "EXIT":
-      self.started.remove(job_id)
-      self.finished_tests += 1
-      (exit_code, time_ms) = args
-      (binary, test) = self.tests[job_id]
-      self.print_test_status(test, time_ms)
-      if exit_code == 0:
-        self.passed = True
-        self.move_to('passed', file_name)
-      else:
-        with open(file_name) as f:
-          for line in f.readlines():
-            self.out.permanent_line(line.rstrip())
-        self.failed.append(job_id)
-        self.move_to('failed', file_name)
-        self.out.permanent_line(
-          "[%d/%d] %s returned/aborted with exit code %d (%d ms)"
-          % (self.finished_tests, self.total_tests, test, exit_code, time_ms))
-    elif command == "TESTCNT":
-      self.total_tests = args[0]
-      self.out.transient_line("[0/%d] Running tests..." % self.total_tests)
-    stdout_lock.release()
+    with stdout_lock:
+      if command == "TEST":
+        self.tests[job_id] = args
+      elif command == "START":
+        self.started.add(job_id)
+      elif command == "EXIT":
+        self.started.remove(job_id)
+        self.finished_tests += 1
+        (exit_code, time_ms) = args
+        (binary, test) = self.tests[job_id]
+        self.print_test_status(test, time_ms)
+        if exit_code == 0:
+          self.passed = True
+          self.move_to('passed', file_name)
+        else:
+          with open(file_name) as f:
+            for line in f.readlines():
+              self.out.permanent_line(line.rstrip())
+          self.failed.append(job_id)
+          self.move_to('failed', file_name)
+          self.out.permanent_line(
+            "[%d/%d] %s returned/aborted with exit code %d (%d ms)"
+            % (self.finished_tests, self.total_tests, test, exit_code, time_ms))
+      elif command == "TESTCNT":
+        self.total_tests = args[0]
+        self.out.transient_line("[0/%d] Running tests..." % self.total_tests)
 
   def end(self):
     if self.failed:
