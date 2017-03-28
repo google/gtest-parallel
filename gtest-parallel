@@ -20,6 +20,7 @@ import multiprocessing
 import optparse
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -27,7 +28,6 @@ import tempfile
 import thread
 import threading
 import time
-import zipfile
 import zlib
 
 # An object that catches SIGINT sent to the Python process and notices
@@ -128,19 +128,13 @@ class FilterFormat:
 
   tests = {}
   outputs = {}
-  failures = []
-  finished = []
+  failed = []
+  started = set()
 
-
-  def write_logs_to_file(self, bundle_name, tests_ids):
-    with open(os.path.join(self.logs_dir, bundle_name), 'w') as logs_bundle:
-      for test_id in tests_ids:
-        log_file = self.outputs[test_id]
-        test_name = os.path.basename(log_file)
-        logs_bundle.write('TEST: ' + test_name + '\n\n')
-        with open(self.outputs[test_id]) as test_log:
-          logs_bundle.write(test_log.read())
-        logs_bundle.write('\n\n')
+  def move_to(self, destination_dir, log_file):
+    destination_dir = os.path.join(self.output_dir, destination_dir)
+    test_name = os.path.basename(log_file)
+    shutil.move(log_file, os.path.join(destination_dir, test_name))
 
   def print_tests(self, message, test_ids):
     self.out.permanent_line("%s (%s/%s):" %
@@ -154,62 +148,52 @@ class FilterFormat:
                             % (self.finished_tests, self.total_tests,
                                last_finished_test, time_ms))
 
-  def handle_meta(self, job_id, args):
-    (command, arg) = args.split(' ', 1)
+  def log(self, job_id, command, args=tuple(), file_name=None):
+    stdout_lock.acquire()
     if command == "TEST":
-      (binary, test) = arg.split(' ', 1)
-      self.tests[job_id] = (binary, test.strip())
+      self.tests[job_id] = args
     elif command == "START":
-      self.outputs[job_id] = arg
+      self.started.add(job_id)
     elif command == "EXIT":
-      (exit_code, time_ms) = [int(x) for x in arg.split(' ', 1)]
+      self.started.remove(job_id)
       self.finished_tests += 1
-      self.finished.append(job_id)
+      (exit_code, time_ms) = args
       (binary, test) = self.tests[job_id]
       self.print_test_status(test, time_ms)
-      if exit_code != 0:
-        self.failures.append(job_id)
-        with open(self.outputs[job_id]) as f:
+      if exit_code == 0:
+        self.move_to('passed', file_name)
+      else:
+        with open(file_name) as f:
           for line in f.readlines():
             self.out.permanent_line(line.rstrip())
+        self.failed.append(job_id)
+        self.move_to('failed', file_name)
         self.out.permanent_line(
           "[%d/%d] %s returned/aborted with exit code %d (%d ms)"
           % (self.finished_tests, self.total_tests, test, exit_code, time_ms))
     elif command == "TESTCNT":
-      self.total_tests = int(arg.split(' ', 1)[1])
+      self.total_tests = args[0]
       self.out.transient_line("[0/%d] Running tests..." % self.total_tests)
-
-  def log(self, line):
-    stdout_lock.acquire()
-    (prefix, output) = line.split(' ', 1)
-
-    assert prefix[-1] == ':'
-    self.handle_meta(int(prefix[:-1]), output)
     stdout_lock.release()
 
   def end(self):
-    if self.failures:
-      self.print_tests("FAILED TESTS", self.failures)
-      self.write_logs_to_file('Failed tests.log', self.failures)
-    interruptions = set(self.outputs) - set(self.finished)
-    if interruptions:
-      self.print_tests("INTERRUPTED TESTS", interruptions)
-      self.write_logs_to_file('Interrupted tests.log', interruptions)
-    self.write_logs_to_file('All tests.log', self.outputs)
-    for test_id in self.outputs:
-      os.remove(self.outputs[test_id])
+    if self.failed:
+      self.print_tests("FAILED TESTS", self.failed)
+    if self.started:
+      self.print_tests("INTERRUPTED TESTS", self.started)
     self.out.flush_transient_output()
 
 class RawFormat:
-  def log(self, line):
+  def log(self, job_id, command, args=tuple(), file_name=None):
     stdout_lock.acquire()
+    line = "%d: %s %s" % (job_id, command, ' '.join(str(arg) for arg in args))
     sys.stdout.write(line + "\n")
+    if command == "EXIT":
+      with open(file_name) as f:
+        for line in f:
+          sys.stdout.write("%d > %s" % (job_id, line))
     sys.stdout.flush()
     stdout_lock.release()
-  def logfile(self, job_id, name):
-    with open(name) as f:
-      for line in f.readlines():
-        self.log(str(job_id) + '> ' + line.rstrip())
   def end(self):
     pass
 
@@ -360,7 +344,7 @@ if options.format == 'raw':
   pass
 elif options.format == 'filter':
   logger = FilterFormat()
-  logger.logs_dir = options.output_dir
+  logger.output_dir = options.output_dir
 else:
   parser.error("Unknown output format: " + options.format)
 
@@ -435,20 +419,21 @@ tests.sort(reverse=True, key=lambda x: ((1 if x[0] is None else 0), x))
 tests = [(test, i + 1) for test in tests for i in range(options.repeat)]
 test_lock = threading.Lock()
 job_id = 0
-logger.log(str(-1) + ': TESTCNT ' + ' ' + str(len(tests)))
+logger.log(-1, "TESTCNT", (len(tests),))
 
 exit_code = 0
 
+# Remove files from old test runs.
+if os.path.isdir(options.output_dir):
+  shutil.rmtree(options.output_dir)
 # Create directory for test log output.
 try:
-  os.makedirs(options.output_dir)
+  for result in 'passed', 'failed', 'interrupted':
+    os.makedirs(os.path.join(options.output_dir, result))
 except OSError as e:
   # Ignore errors if this directory already exists.
   if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
     raise e
-# Remove files from old test runs.
-for logfile in os.listdir(options.output_dir):
-  os.remove(os.path.join(options.output_dir, logfile))
 
 # Run the specified job. Return the elapsed time in milliseconds if
 # the job succeeds, or None if the job fails. (This ensures that
@@ -457,8 +442,8 @@ def run_job((command, job_id, test, test_index)):
   begin = time.time()
 
   test_name = re.sub('[^A-Za-z0-9]', '_', test) + '-' + str(test_index) + '.log'
-  test_file = os.path.join(options.output_dir, test_name)
-  logger.log("%s: START %s" % (job_id, test_file))
+  test_file = os.path.join(options.output_dir, 'interrupted', test_name)
+  logger.log(job_id, "START")
   with open(test_file, 'w') as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
                              ['--gtest_color=' + options.gtest_color],
@@ -474,7 +459,7 @@ def run_job((command, job_id, test, test_index)):
       "actual": "PASS" if code == 0 else "FAIL",
       "time": runtime_ms,
   })
-  logger.log("%s: EXIT %s %d" % (job_id, code, runtime_ms))
+  logger.log(job_id, "EXIT", (code, runtime_ms), file_name=test_file)
   if code == 0:
     return runtime_ms
   global exit_code
@@ -488,7 +473,7 @@ def worker():
     test_lock.acquire()
     if job_id < len(tests):
       ((_, test_binary, test, command), test_index) = tests[job_id]
-      logger.log(str(job_id) + ': TEST ' + test_binary + ' ' + test)
+      logger.log(job_id, "TEST", (test_binary, test))
       job = (command, job_id, test, test_index)
     job_id += 1
     test_lock.release()
