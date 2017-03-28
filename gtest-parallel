@@ -128,6 +128,7 @@ class FilterFormat:
 
   tests = {}
   outputs = {}
+  passed = False
   failed = []
   started = set()
 
@@ -161,6 +162,7 @@ class FilterFormat:
       (binary, test) = self.tests[job_id]
       self.print_test_status(test, time_ms)
       if exit_code == 0:
+        self.passed = True
         self.move_to('passed', file_name)
       else:
         with open(file_name) as f:
@@ -179,8 +181,14 @@ class FilterFormat:
   def end(self):
     if self.failed:
       self.print_tests("FAILED TESTS", self.failed)
+    else:
+      os.rmdir(os.path.join(self.output_dir, 'failed'))
     if self.started:
       self.print_tests("INTERRUPTED TESTS", self.started)
+    else:
+      os.rmdir(os.path.join(self.output_dir, 'interrupted'))
+    if not self.passed:
+      os.rmdir(os.path.join(self.output_dir, 'passed'))
     self.out.flush_transient_output()
 
 class RawFormat:
@@ -453,7 +461,6 @@ def run_job((command, job_id, test, test_index)):
     except sigint_handler.ProcessWasInterrupted:
       thread.exit()
     runtime_ms = int(1000 * (time.time() - begin))
-    logger.logfile(job_id, log.name)
 
   test_results.log(test, {
       "expected": "PASS",
