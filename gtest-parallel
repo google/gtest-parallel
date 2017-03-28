@@ -453,6 +453,7 @@ def run_job((command, job_id, test, test_index)):
     except sigint_handler.ProcessWasInterrupted:
       thread.exit()
     runtime_ms = int(1000 * (time.time() - begin))
+    logger.logfile(job_id, log.name)
 
   test_results.log(test, {
       "expected": "PASS",
