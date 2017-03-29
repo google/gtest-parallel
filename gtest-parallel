@@ -128,14 +128,17 @@ class FilterFormat:
 
   tests = {}
   outputs = {}
-  passed = False
+  passed = []
   failed = []
   started = set()
 
-  def move_to(self, destination_dir, log_file):
+  def move_to(self, destination_dir, test_ids):
     destination_dir = os.path.join(self.output_dir, destination_dir)
-    test_name = os.path.basename(log_file)
-    shutil.move(log_file, os.path.join(destination_dir, test_name))
+    os.makedirs(destination_dir)
+    for test_id in test_ids:
+        log_file = self.outputs[test_id]
+        test_name = os.path.basename(log_file)
+        shutil.move(log_file, os.path.join(destination_dir, test_name))
 
   def print_tests(self, message, test_ids):
     self.out.permanent_line("%s (%s/%s):" %
@@ -155,6 +158,7 @@ class FilterFormat:
         self.tests[job_id] = args
       elif command == "START":
         self.started.add(job_id)
+        self.outputs[job_id] = file_name
       elif command == "EXIT":
         self.started.remove(job_id)
         self.finished_tests += 1
@@ -162,14 +166,12 @@ class FilterFormat:
         (binary, test) = self.tests[job_id]
         self.print_test_status(test, time_ms)
         if exit_code == 0:
-          self.passed = True
-          self.move_to('passed', file_name)
+          self.passed.append(job_id)
         else:
+          self.failed.append(job_id)
           with open(file_name) as f:
             for line in f.readlines():
               self.out.permanent_line(line.rstrip())
-          self.failed.append(job_id)
-          self.move_to('failed', file_name)
           self.out.permanent_line(
             "[%d/%d] %s returned/aborted with exit code %d (%d ms)"
             % (self.finished_tests, self.total_tests, test, exit_code, time_ms))
@@ -178,16 +180,14 @@ class FilterFormat:
         self.out.transient_line("[0/%d] Running tests..." % self.total_tests)
 
   def end(self):
+    if self.passed:
+      self.move_to('passed', self.passed)
     if self.failed:
       self.print_tests("FAILED TESTS", self.failed)
-    else:
-      os.rmdir(os.path.join(self.output_dir, 'failed'))
+      self.move_to('failed', self.failed)
     if self.started:
       self.print_tests("INTERRUPTED TESTS", self.started)
-    else:
-      os.rmdir(os.path.join(self.output_dir, 'interrupted'))
-    if not self.passed:
-      os.rmdir(os.path.join(self.output_dir, 'passed'))
+      self.move_to('interrupted', self.started)
     self.out.flush_transient_output()
 
 class RawFormat:
@@ -435,8 +435,7 @@ if os.path.isdir(options.output_dir):
   shutil.rmtree(options.output_dir)
 # Create directory for test log output.
 try:
-  for result in 'passed', 'failed', 'interrupted':
-    os.makedirs(os.path.join(options.output_dir, result))
+  os.makedirs(options.output_dir)
 except OSError as e:
   # Ignore errors if this directory already exists.
   if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
@@ -449,8 +448,8 @@ def run_job((command, job_id, test, test_index)):
   begin = time.time()
 
   test_name = re.sub('[^A-Za-z0-9]', '_', test) + '-' + str(test_index) + '.log'
-  test_file = os.path.join(options.output_dir, 'interrupted', test_name)
-  logger.log(job_id, "START")
+  test_file = os.path.join(options.output_dir, test_name)
+  logger.log(job_id, "START", file_name=test_file)
   with open(test_file, 'w') as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
                              ['--gtest_color=' + options.gtest_color],
