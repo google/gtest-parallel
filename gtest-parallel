@@ -369,6 +369,13 @@ timeout = (DummyTimer() if options.timeout is None
 test_results = (IgnoreTestResults() if options.dump_json_test_results is None
                 else CollectTestResults(options.dump_json_test_results))
 
+# Check that all test binaries have an unique basename. That way we can ensure
+# the logs are saved to unique files even when two different binaries have
+# common tests.
+unique_binaries = set(os.path.basename(binary) for binary in binaries)
+assert len(unique_binaries) == len(binaries), (
+    "All test binaries must have an unique basename.")
+
 # Find tests.
 save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
 times = TestTimes(save_file)
@@ -447,8 +454,10 @@ except OSError as e:
 def run_job((command, job_id, test, test_index)):
   begin = time.time()
 
-  test_name = re.sub('[^A-Za-z0-9]', '_', test) + '-' + str(test_index) + '.log'
-  test_file = os.path.join(options.output_dir, test_name)
+  test_binary = re.sub('[^A-Za-z0-9]', '_', os.path.basename(command[-1]))
+  test_name = re.sub('[^A-Za-z0-9]', '_', test)
+  test_file = os.path.join(options.output_dir, '%s-%s-%s.log' % (
+      test_binary, test_name, test_index))
   logger.log(job_id, "START", file_name=test_file)
   with open(test_file, 'w') as log:
     sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
