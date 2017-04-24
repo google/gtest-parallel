@@ -115,6 +115,51 @@ class Outputter(object):
     self.flush_transient_output()
     self.__out_file.write(msg + "\n")
 
+
+class Task(object):
+  def __init__(self, task_id, test_binary, test_name, command, execution_number,
+               last_execution_time, output_dir):
+    self.task_id = task_id
+    self.test_name = test_name
+    self.test_binary = test_binary
+    self.execution_number = execution_number
+    self.last_execution_time = last_execution_time
+
+    log_name = '%s-%s-%s.log' % (self.__normalize(test_binary),
+                                 self.__normalize(test_name), execution_number)
+
+    self.log_file = os.path.join(output_dir, log_name)
+    self.command = command + ['--gtest_filter=' + test_name]
+
+    self.exit_code = None
+    self.runtime_ms = None
+
+  def __normalize(self, string):
+    return re.sub('[^A-Za-z0-9]', '_', string)
+
+  def run(self):
+    logger.log_start(self.task_id)
+    begin = time.time()
+    with open(self.log_file, 'w') as log:
+      task = subprocess.Popen(self.command, stdout=log, stderr=log)
+      try:
+        self.exit_code = sigint_handler.wait(task)
+      except sigint_handler.ProcessWasInterrupted:
+        thread.exit()
+    self.runtime_ms = int(1000 * (time.time() - begin))
+    test_results.log(self.test_name, {
+        "expected": "PASS",
+        "actual": "PASS" if self.exit_code == 0 else "FAIL",
+        "time": self.runtime_ms,
+    })
+    logger.log_exit(self.task_id)
+    if self.exit_code == 0:
+      return self.runtime_ms
+    global exit_code
+    exit_code = self.exit_code
+    return None
+
+
 stdout_lock = threading.Lock()
 
 class FilterFormat:
@@ -123,61 +168,60 @@ class FilterFormat:
     sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 
   out = Outputter(sys.stdout)
-  total_tests = 0
-  finished_tests = 0
+  total_tasks = 0
+  finished_tasks = 0
 
-  tests = {}
-  outputs = {}
+  tasks = []
   passed = []
   failed = []
   started = set()
 
-  def move_to(self, destination_dir, test_ids):
+  def move_to(self, destination_dir, task_ids):
     destination_dir = os.path.join(self.output_dir, destination_dir)
     os.makedirs(destination_dir)
-    for test_id in test_ids:
-        log_file = self.outputs[test_id]
-        test_name = os.path.basename(log_file)
-        shutil.move(log_file, os.path.join(destination_dir, test_name))
+    for task_id in task_ids:
+        shutil.move(self.tasks[task_id].log_file, destination_dir)
 
-  def print_tests(self, message, test_ids):
+  def print_tests(self, message, task_ids):
     self.out.permanent_line("%s (%s/%s):" %
-                            (message, len(test_ids), self.total_tests))
-    test_ids = sorted(test_ids, key=lambda test_id: self.tests[test_id])
-    for test_id in test_ids:
-      self.out.permanent_line(" %s: %s" % self.tests[test_id])
+                            (message, len(task_ids), self.total_tasks))
+    tasks = sorted(
+        (self.tasks[task_id].test_binary, self.tasks[task_id].test_name)
+        for task_id in task_ids)
+    for task in tasks:
+      self.out.permanent_line(" %s: %s" % task)
 
-  def print_test_status(self, last_finished_test, time_ms):
+  def print_test_status(self, last_finished_task, time_ms):
     self.out.transient_line("[%d/%d] %s (%d ms)"
-                            % (self.finished_tests, self.total_tests,
-                               last_finished_test, time_ms))
+                            % (self.finished_tasks, self.total_tasks,
+                               last_finished_task, time_ms))
 
-  def log(self, job_id, command, args=tuple(), file_name=None):
+  def log_start(self, task_id):
+    self.started.add(task_id)
+
+  def log_exit(self, task_id):
     with stdout_lock:
-      if command == "TEST":
-        self.tests[job_id] = args
-      elif command == "START":
-        self.started.add(job_id)
-        self.outputs[job_id] = file_name
-      elif command == "EXIT":
-        self.started.remove(job_id)
-        self.finished_tests += 1
-        (exit_code, time_ms) = args
-        (binary, test) = self.tests[job_id]
-        self.print_test_status(test, time_ms)
-        if exit_code == 0:
-          self.passed.append(job_id)
-        else:
-          self.failed.append(job_id)
-          with open(file_name) as f:
-            for line in f.readlines():
-              self.out.permanent_line(line.rstrip())
-          self.out.permanent_line(
-            "[%d/%d] %s returned/aborted with exit code %d (%d ms)"
-            % (self.finished_tests, self.total_tests, test, exit_code, time_ms))
-      elif command == "TESTCNT":
-        self.total_tests = args[0]
-        self.out.transient_line("[0/%d] Running tests..." % self.total_tests)
+      self.started.remove(task_id)
+      self.finished_tasks += 1
+
+      task = self.tasks[task_id]
+      self.print_test_status(task.test_name, task.runtime_ms)
+      if exit_code == 0:
+        self.passed.append(task_id)
+      else:
+        self.failed.append(task_id)
+        with open(task.log_file) as f:
+          for line in f.readlines():
+            self.out.permanent_line(line.rstrip())
+        self.out.permanent_line(
+          "[%d/%d] %s returned/aborted with exit code %d (%d ms)"
+          % (self.finished_tasks, self.total_tasks, task.test_name,
+             task.exit_code, task.runtime_ms))
+
+  def log_tasks(self, tasks):
+    self.tasks = tasks
+    self.total_tasks = len(tasks)
+    self.out.transient_line("[0/%d] Running tests..." % self.total_tasks)
 
   def end(self):
     if self.passed:
@@ -190,19 +234,6 @@ class FilterFormat:
       self.move_to('interrupted', self.started)
     self.out.flush_transient_output()
 
-class RawFormat:
-  def log(self, job_id, command, args=tuple(), file_name=None):
-    stdout_lock.acquire()
-    line = "%d: %s %s" % (job_id, command, ' '.join(str(arg) for arg in args))
-    sys.stdout.write(line + "\n")
-    if command == "EXIT":
-      with open(file_name) as f:
-        for line in f:
-          sys.stdout.write("%d > %s" % (job_id, line))
-    sys.stdout.flush()
-    stdout_lock.release()
-  def end(self):
-    pass
 
 class CollectTestResults(object):
   def __init__(self, json_dump_filepath):
@@ -322,8 +353,6 @@ parser.add_option('--gtest_filter', type='string', default='',
                   help='test filter')
 parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
                   default=False, help='run disabled tests too')
-parser.add_option('--format', type='string', default='filter',
-                  help='output format (raw,filter)')
 parser.add_option('--print_test_times', action='store_true', default=False,
                   help='list the run time of each test at the end of execution')
 parser.add_option('--shard_count', type='int', default=1,
@@ -346,14 +375,8 @@ if binaries == []:
   parser.print_usage()
   sys.exit(1)
 
-logger = RawFormat()
-if options.format == 'raw':
-  pass
-elif options.format == 'filter':
-  logger = FilterFormat()
-  logger.output_dir = options.output_dir
-else:
-  parser.error("Unknown output format: " + options.format)
+logger = FilterFormat()
+logger.output_dir = options.output_dir
 
 if options.shard_count < 1:
   parser.error("Invalid number of shards: %d. Must be at least 1." %
@@ -379,7 +402,8 @@ assert len(unique_binaries) == len(binaries), (
 # Find tests.
 save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
 times = TestTimes(save_file)
-tests = []
+tasks = []
+test_count = 0
 for test_binary in binaries:
   command = [test_binary]
   if options.gtest_also_run_disabled_tests:
@@ -395,7 +419,7 @@ for test_binary in binaries:
   except OSError as e:
     sys.exit("%s: %s" % (test_binary, str(e)))
 
-  command += additional_args
+  command += additional_args + ['--gtest_color=' + options.gtest_color]
 
   test_group = ''
   for line in test_list.split('\n'):
@@ -413,27 +437,30 @@ for test_binary in binaries:
     test = test_group + line
     if not options.gtest_also_run_disabled_tests and 'DISABLED_' in test:
       continue
-    tests.append((times.get_test_time(test_binary, test),
-                  test_binary, test, command))
 
-tests = tests[options.shard_index::options.shard_count]
+    last_execution_time = times.get_test_time(test_binary, test)
+    if options.failed and last_execution_time is not None:
+      continue
 
-if options.failed:
-  # The first element of each entry is the runtime of the most recent
-  # run if it was successful, or None if the test is new or the most
-  # recent run failed.
-  tests = [x for x in tests if x[0] is None]
+    if (test_count - options.shard_index) % options.shard_count == 0:
+      for execution_number in range(options.repeat):
+        task_id = len(tasks)
+        tasks.append(Task(task_id, test_binary, test, command,
+                          execution_number + 1, last_execution_time,
+                          options.output_dir))
+
+    test_count += 1
+
+logger.log_tasks(tasks)
 
 # Sort tests by falling runtime (with None, which is what we get for
 # new and failing tests, being considered larger than any real
 # runtime).
-tests.sort(reverse=True, key=lambda x: ((1 if x[0] is None else 0), x))
+tasks = sorted(tasks, key=lambda task: (task.last_execution_time is None, task),
+               reverse=True)
 
-# Repeat tests (-r flag).
-tests = [(test, i + 1) for test in tests for i in range(options.repeat)]
-test_lock = threading.Lock()
-job_id = 0
-logger.log(-1, "TESTCNT", (len(tests),))
+task_lock = threading.Lock()
+task_id = 0
 
 exit_code = 0
 
@@ -448,53 +475,18 @@ except OSError as e:
   if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
     raise e
 
-# Run the specified job. Return the elapsed time in milliseconds if
-# the job succeeds, or None if the job fails. (This ensures that
-# failing tests will run first the next time.)
-def run_job((command, job_id, test, test_index)):
-  begin = time.time()
-
-  test_binary = re.sub('[^A-Za-z0-9]', '_', os.path.basename(command[-1]))
-  test_name = re.sub('[^A-Za-z0-9]', '_', test)
-  test_file = os.path.join(options.output_dir, '%s-%s-%s.log' % (
-      test_binary, test_name, test_index))
-  logger.log(job_id, "START", file_name=test_file)
-  with open(test_file, 'w') as log:
-    sub = subprocess.Popen(command + ['--gtest_filter=' + test] +
-                             ['--gtest_color=' + options.gtest_color],
-                           stdout=log, stderr=log)
-    try:
-      code = sigint_handler.wait(sub)
-    except sigint_handler.ProcessWasInterrupted:
-      thread.exit()
-    runtime_ms = int(1000 * (time.time() - begin))
-
-  test_results.log(test, {
-      "expected": "PASS",
-      "actual": "PASS" if code == 0 else "FAIL",
-      "time": runtime_ms,
-  })
-  logger.log(job_id, "EXIT", (code, runtime_ms), file_name=test_file)
-  if code == 0:
-    return runtime_ms
-  global exit_code
-  exit_code = code
-  return None
-
 def worker():
-  global job_id
+  global task_id
   while True:
-    job = None
-    test_lock.acquire()
-    if job_id < len(tests):
-      ((_, test_binary, test, command), test_index) = tests[job_id]
-      logger.log(job_id, "TEST", (test_binary, test))
-      job = (command, job_id, test, test_index)
-    job_id += 1
-    test_lock.release()
-    if job is None:
+    task = None
+    task_lock.acquire()
+    if task_id < len(tasks):
+      task = tasks[task_id]
+    task_id += 1
+    task_lock.release()
+    if task is None:
       return
-    times.record_test_time(test_binary, test, run_job(job))
+    times.record_test_time(task.test_binary, task.test_name, task.run())
 
 def start_daemon(func):
   t = threading.Thread(target=func)
