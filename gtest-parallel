@@ -117,11 +117,12 @@ class Outputter(object):
 
 
 class Task(object):
-  def __init__(self, task_id, test_binary, test_name, command, execution_number,
-               last_execution_time, output_dir):
+  def __init__(self, task_id, test_binary, test_name, test_command,
+               execution_number, last_execution_time, output_dir):
     self.task_id = task_id
     self.test_name = test_name
     self.test_binary = test_binary
+    self.test_command = test_command
     self.execution_number = execution_number
     self.last_execution_time = last_execution_time
 
@@ -129,11 +130,9 @@ class Task(object):
                                  self.__normalize(test_name), execution_number)
 
     self.log_file = os.path.join(output_dir, log_name)
-    self.command = command + ['--gtest_filter=' + test_name]
 
     self.exit_code = None
     self.runtime_ms = None
-
 
   def __lt__(self, other):
     if self.last_execution_time is None:
@@ -142,7 +141,6 @@ class Task(object):
       return False
     return self.last_execution_time > other.last_execution_time
 
-
   def __normalize(self, string):
     return re.sub('[^A-Za-z0-9]', '_', string)
 
@@ -150,42 +148,39 @@ class Task(object):
     logger.log_start(self.task_id)
     begin = time.time()
     with open(self.log_file, 'w') as log:
-      task = subprocess.Popen(self.command, stdout=log, stderr=log)
+      task = subprocess.Popen(self.test_command, stdout=log, stderr=log)
       try:
         self.exit_code = sigint_handler.wait(task)
       except sigint_handler.ProcessWasInterrupted:
         thread.exit()
     self.runtime_ms = int(1000 * (time.time() - begin))
+    self.last_execution_time = None if self.exit_code else self.runtime_ms
     test_results.log(self.test_name, {
         "expected": "PASS",
         "actual": "PASS" if self.exit_code == 0 else "FAIL",
         "time": self.runtime_ms,
     })
     logger.log_exit(self.task_id)
-    if self.exit_code == 0:
-      self.last_execution_time = self.runtime_ms
-      return self.runtime_ms
-    global global_exit_code
-    global_exit_code = self.exit_code
-    self.last_execution_time = None
-    return None
 
 
 stdout_lock = threading.Lock()
 
 class FilterFormat:
-  if sys.stdout.isatty():
-    # stdout needs to be unbuffered since the output is interactive.
-    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+  def __init__(self, output_dir):
+    if sys.stdout.isatty():
+      # stdout needs to be unbuffered since the output is interactive.
+      sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 
-  out = Outputter(sys.stdout)
-  total_tasks = 0
-  finished_tasks = 0
+    self.output_dir = output_dir
+    self.out = Outputter(sys.stdout)
+    self.total_tasks = 0
+    self.finished_tasks = 0
+    self.global_exit_code = 0
 
-  tasks = []
-  passed = []
-  failed = []
-  started = set()
+    self.tasks = []
+    self.passed = []
+    self.failed = []
+    self.started = set()
 
   def move_to(self, destination_dir, task_ids):
     destination_dir = os.path.join(self.output_dir, destination_dir)
@@ -217,9 +212,12 @@ class FilterFormat:
 
       task = self.tasks[task_id]
       self.print_test_status(task.test_name, task.runtime_ms)
+      times.record_test_time(task.test_binary, task.test_name,
+                             task.last_runtime_ms)
       if task.exit_code == 0:
         self.passed.append(task_id)
       else:
+        self.global_exit_code = task.exit_code
         self.failed.append(task_id)
         with open(task.log_file) as f:
           for line in f.readlines():
@@ -336,6 +334,94 @@ class TestTimes(object):
     except IOError:
       pass  # ignore errors---saving the times isn't that important
 
+
+def find_tests(binaries, additional_args):
+  test_count = 0
+  tasks = []
+  for test_binary in binaries:
+    command = [test_binary]
+    if options.gtest_also_run_disabled_tests:
+      command += ['--gtest_also_run_disabled_tests']
+
+    list_command = command + ['--gtest_list_tests']
+    if options.gtest_filter != '':
+      list_command += ['--gtest_filter=' + options.gtest_filter]
+
+    try:
+      test_list = subprocess.Popen(list_command,
+                                   stdout=subprocess.PIPE).communicate()[0]
+    except OSError as e:
+      sys.exit("%s: %s" % (test_binary, str(e)))
+
+    command += additional_args + ['--gtest_color=' + options.gtest_color]
+
+    test_group = ''
+    for line in test_list.split('\n'):
+      if not line.strip():
+        continue
+      if line[0] != " ":
+        # Remove comments for typed tests and strip whitespace.
+        test_group = line.split('#')[0].strip()
+        continue
+      # Remove comments for parameterized tests and strip whitespace.
+      line = line.split('#')[0].strip()
+      if not line:
+        continue
+
+      test_name = test_group + line
+      if not options.gtest_also_run_disabled_tests and 'DISABLED_' in test_name:
+        continue
+
+      last_execution_time = times.get_test_time(test_binary, test_name)
+      if options.failed and last_execution_time is not None:
+        continue
+
+      test_command = command + ['--gtest_filter=' + test_name]
+      if (test_count - options.shard_index) % options.shard_count == 0:
+        for execution_number in range(options.repeat):
+          task_id = len(tasks)
+          tasks.append(Task(task_id, test_binary, test_name, test_command,
+                            execution_number + 1, last_execution_time,
+                            options.output_dir))
+
+      test_count += 1
+
+  return tasks
+
+
+def execute_tasks(tasks):
+  class WorkerFn(object):
+    def __init__(self, tasks):
+      self.task_id = 0
+      self.tasks = tasks
+      self.task_lock = threading.Lock()
+
+    def __call__(self):
+      while True:
+        task = None
+        with self.task_lock:
+          if self.task_id < len(self.tasks):
+            task = self.tasks[self.task_id]
+          self.task_id += 1
+        if task is None:
+          return
+        task.run()
+
+  def start_daemon(func):
+    t = threading.Thread(target=func)
+    t.daemon = True
+    t.start()
+    return t
+
+  try:
+    timeout.start()
+    worker_fn = WorkerFn(tasks)
+    workers = [start_daemon(worker_fn) for _ in range(options.workers)]
+    [t.join() for t in workers]
+  finally:
+    timeout.cancel()
+
+
 # Remove additional arguments (anything after --).
 additional_args = []
 
@@ -386,9 +472,6 @@ if binaries == []:
   parser.print_usage()
   sys.exit(1)
 
-logger = FilterFormat()
-logger.output_dir = options.output_dir
-
 if options.shard_count < 1:
   parser.error("Invalid number of shards: %d. Must be at least 1." %
                options.shard_count)
@@ -397,83 +480,12 @@ if not (0 <= options.shard_index < options.shard_count):
                "(less than the number of shards)." %
                (options.shard_index, options.shard_count - 1))
 
-timeout = (DummyTimer() if options.timeout is None
-           else threading.Timer(options.timeout, sigint_handler.interrupt))
-
-test_results = (IgnoreTestResults() if options.dump_json_test_results is None
-                else CollectTestResults(options.dump_json_test_results))
-
 # Check that all test binaries have an unique basename. That way we can ensure
 # the logs are saved to unique files even when two different binaries have
 # common tests.
 unique_binaries = set(os.path.basename(binary) for binary in binaries)
 assert len(unique_binaries) == len(binaries), (
     "All test binaries must have an unique basename.")
-
-# Find tests.
-save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
-times = TestTimes(save_file)
-tasks = []
-test_count = 0
-for test_binary in binaries:
-  command = [test_binary]
-  if options.gtest_also_run_disabled_tests:
-    command += ['--gtest_also_run_disabled_tests']
-
-  list_command = list(command)
-  if options.gtest_filter != '':
-    list_command += ['--gtest_filter=' + options.gtest_filter]
-
-  try:
-    test_list = subprocess.Popen(list_command + ['--gtest_list_tests'],
-                                 stdout=subprocess.PIPE).communicate()[0]
-  except OSError as e:
-    sys.exit("%s: %s" % (test_binary, str(e)))
-
-  command += additional_args + ['--gtest_color=' + options.gtest_color]
-
-  test_group = ''
-  for line in test_list.split('\n'):
-    if not line.strip():
-      continue
-    if line[0] != " ":
-      # Remove comments for typed tests and strip whitespace.
-      test_group = line.split('#')[0].strip()
-      continue
-    # Remove comments for parameterized tests and strip whitespace.
-    line = line.split('#')[0].strip()
-    if not line:
-      continue
-
-    test = test_group + line
-    if not options.gtest_also_run_disabled_tests and 'DISABLED_' in test:
-      continue
-
-    last_execution_time = times.get_test_time(test_binary, test)
-    if options.failed and last_execution_time is not None:
-      continue
-
-    if (test_count - options.shard_index) % options.shard_count == 0:
-      for execution_number in range(options.repeat):
-        task_id = len(tasks)
-        tasks.append(Task(task_id, test_binary, test, command,
-                          execution_number + 1, last_execution_time,
-                          options.output_dir))
-
-    test_count += 1
-
-logger.log_tasks(tasks)
-
-# Sort tests by falling runtime (with None, which is what we get for
-# new and failing tests, being considered larger than any real
-# runtime).
-tasks = sorted(tasks, key=lambda task: (task.last_execution_time is None, task),
-               reverse=True)
-
-task_lock = threading.Lock()
-task_id = 0
-
-global_exit_code = 0
 
 # Remove files from old test runs.
 if os.path.isdir(options.output_dir):
@@ -486,31 +498,24 @@ except OSError as e:
   if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
     raise e
 
-def worker():
-  global task_id
-  while True:
-    task = None
-    task_lock.acquire()
-    if task_id < len(tasks):
-      task = tasks[task_id]
-    task_id += 1
-    task_lock.release()
-    if task is None:
-      return
-    times.record_test_time(task.test_binary, task.test_name, task.run())
+timeout = (DummyTimer() if options.timeout is None
+           else threading.Timer(options.timeout, sigint_handler.interrupt))
 
-def start_daemon(func):
-  t = threading.Thread(target=func)
-  t.daemon = True
-  t.start()
-  return t
+test_results = (IgnoreTestResults() if options.dump_json_test_results is None
+                else CollectTestResults(options.dump_json_test_results))
 
-try:
-  timeout.start()
-  workers = [start_daemon(worker) for i in range(options.workers)]
-  [t.join() for t in workers]
-finally:
-  timeout.cancel()
+save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
+times = TestTimes(save_file)
+
+logger = FilterFormat(options.output_dir)
+tasks = find_tests(binaries, additional_args)
+
+logger.log_tasks(tasks)
+
+# Sort tests by falling runtime (with None, which is what we get for
+# new and failing tests, being considered larger than any real
+# runtime).
+execute_tasks(sorted(tasks))
 
 logger.end()
 times.write_to_file(save_file)
@@ -520,4 +525,6 @@ if options.print_test_times:
       print "%8s %s" % ("%dms" % task.runtime_ms, task.test_name)
 
 test_results.dump_to_file_and_close()
-sys.exit(-signal.SIGINT if sigint_handler.got_sigint() else global_exit_code)
+if sigint_handler.got_sigint():
+  logger.global_exit_code = -signal.SIGINT
+sys.exit(logger.global_exit_code)
