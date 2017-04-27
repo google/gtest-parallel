@@ -155,8 +155,8 @@ class Task(object):
     logger.log_exit(self.task_id)
     if self.exit_code == 0:
       return self.runtime_ms
-    global exit_code
-    exit_code = self.exit_code
+    global global_exit_code
+    global_exit_code = self.exit_code
     return None
 
 
@@ -206,7 +206,7 @@ class FilterFormat:
 
       task = self.tasks[task_id]
       self.print_test_status(task.test_name, task.runtime_ms)
-      if exit_code == 0:
+      if task.exit_code == 0:
         self.passed.append(task_id)
       else:
         self.failed.append(task_id)
@@ -462,7 +462,7 @@ tasks = sorted(tasks, key=lambda task: (task.last_execution_time is None, task),
 task_lock = threading.Lock()
 task_id = 0
 
-exit_code = 0
+global_exit_code = 0
 
 # Remove files from old test runs.
 if os.path.isdir(options.output_dir):
@@ -511,4 +511,4 @@ if options.print_test_times:
     print "%8s %s" % ("%dms" % time_ms, test)
 
 test_results.dump_to_file_and_close()
-sys.exit(-signal.SIGINT if sigint_handler.got_sigint() else exit_code)
+sys.exit(-signal.SIGINT if sigint_handler.got_sigint() else global_exit_code)
