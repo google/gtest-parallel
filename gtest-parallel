@@ -134,6 +134,15 @@ class Task(object):
     self.exit_code = None
     self.runtime_ms = None
 
+
+  def __lt__(self, other):
+    if self.last_execution_time is None:
+      return True
+    if other.last_execution_time is None:
+      return False
+    return self.last_execution_time > other.last_execution_time
+
+
   def __normalize(self, string):
     return re.sub('[^A-Za-z0-9]', '_', string)
 
@@ -154,9 +163,11 @@ class Task(object):
     })
     logger.log_exit(self.task_id)
     if self.exit_code == 0:
+      self.last_execution_time = self.runtime_ms
       return self.runtime_ms
-    global exit_code
-    exit_code = self.exit_code
+    global global_exit_code
+    global_exit_code = self.exit_code
+    self.last_execution_time = None
     return None
 
 
@@ -206,7 +217,7 @@ class FilterFormat:
 
       task = self.tasks[task_id]
       self.print_test_status(task.test_name, task.runtime_ms)
-      if exit_code == 0:
+      if task.exit_code == 0:
         self.passed.append(task_id)
       else:
         self.failed.append(task_id)
@@ -462,7 +473,7 @@ tasks = sorted(tasks, key=lambda task: (task.last_execution_time is None, task),
 task_lock = threading.Lock()
 task_id = 0
 
-exit_code = 0
+global_exit_code = 0
 
 # Remove files from old test runs.
 if os.path.isdir(options.output_dir):
@@ -504,11 +515,9 @@ finally:
 logger.end()
 times.write_to_file(save_file)
 if options.print_test_times:
-  ts = sorted((times.get_test_time(test_binary, test), test_binary, test)
-              for (_, test_binary, test, _) in tests
-              if times.get_test_time(test_binary, test) is not None)
-  for (time_ms, test_binary, test) in ts:
-    print "%8s %s" % ("%dms" % time_ms, test)
+  for task in sorted(tasks):
+    if task.last_execution_time is not None:
+      print "%8s %s" % ("%dms" % task.runtime_ms, task.test_name)
 
 test_results.dump_to_file_and_close()
-sys.exit(-signal.SIGINT if sigint_handler.got_sigint() else exit_code)
+sys.exit(-signal.SIGINT if sigint_handler.got_sigint() else global_exit_code)
