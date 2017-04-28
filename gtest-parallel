@@ -402,9 +402,9 @@ def execute_tasks(tasks):
         with self.task_lock:
           if self.task_id < len(self.tasks):
             task = self.tasks[self.task_id]
-          self.task_id += 1
-        if task is None:
-          return
+            self.task_id += 1
+          else:
+            return
         task.run()
 
   def start_daemon(func):
@@ -417,7 +417,8 @@ def execute_tasks(tasks):
     timeout.start()
     worker_fn = WorkerFn(tasks)
     workers = [start_daemon(worker_fn) for _ in range(options.workers)]
-    [t.join() for t in workers]
+    for worker in workers:
+      worker.join()
   finally:
     timeout.cancel()
 
