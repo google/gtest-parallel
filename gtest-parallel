@@ -213,7 +213,7 @@ class FilterFormat:
       task = self.tasks[task_id]
       self.print_test_status(task.test_name, task.runtime_ms)
       times.record_test_time(task.test_binary, task.test_name,
-                             task.last_runtime_ms)
+                             task.last_execution_time)
       if task.exit_code == 0:
         self.passed.append(task_id)
       else:
