@@ -398,7 +398,6 @@ def execute_tasks(tasks):
 
     def __call__(self):
       while True:
-        task = None
         with self.task_lock:
           if self.task_id < len(self.tasks):
             task = self.tasks[self.task_id]
