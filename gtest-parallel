@@ -118,21 +118,23 @@ class Outputter(object):
 
 
 class Task(object):
-  def __init__(self, test_binary, test_name, test_command, execution_number,
+  def __init__(self, test_binary, test_name, test_command,
                last_execution_time, output_dir):
     self.test_name = test_name
     self.output_dir = output_dir
     self.test_binary = test_binary
     self.test_command = test_command
-    self.execution_number = execution_number
     self.last_execution_time = last_execution_time
 
+    self.test_id = (test_binary, test_name)
+
+    self.execution_number = task_manager.get_next_execution_number(self.test_id)
     log_name = '%s-%s-%s.log' % (self.__normalize(test_binary),
-                                 self.__normalize(test_name), execution_number)
+                                 self.__normalize(test_name),
+                                 self.execution_number)
 
     self.log_file = os.path.join(output_dir, log_name)
-    self.task_id = (test_binary, test_name, execution_number)
-    self.test_id = (test_binary, test_name)
+    self.task_id = (test_binary, test_name, self.execution_number)
 
     self.exit_code = None
     self.runtime_ms = None
@@ -165,30 +167,26 @@ class TaskManager(object):
     self.logger = logger
     self.test_results = test_results
 
+    self.global_exit_code = 0
+
     self.passed = []
     self.failed = []
     self.started = {}
-    self.tasks_to_run = []
-    self.global_exit_code = 0
-    self.tasks_by_test = collections.defaultdict(list)
+    self.execution_number = {}
+
     self.lock = threading.Lock()
 
-  def register(self, task):
-    self.tasks_to_run.append(task)
-    self.tasks_by_test[task.test_id].append(task.task_id)
+  def get_next_execution_number(self, test_id):
+    with self.lock:
+      next_execution_number = self.execution_number.setdefault(test_id, 1)
+      self.execution_number[test_id] += 1
+    return next_execution_number
 
-  def get_tasks_to_run(self):
-    tasks = sorted(self.tasks_to_run)
-    self.tasks_to_run = []
-    return tasks
-
-  def start_task(self, task):
+  def __register_start(self, task):
     with self.lock:
       self.started[task.task_id] = task
-    task.run()
-    self.end_task(task)
 
-  def end_task(self, task):
+  def __register_exit(self, task):
     self.logger.log_exit(task)
     self.times.record_test_time(task.test_binary, task.test_name,
                                 task.last_execution_time)
@@ -199,20 +197,25 @@ class TaskManager(object):
     with self.lock:
       self.started.pop(task.task_id)
 
-      execution_number = len(self.tasks_by_test[task.test_id])
-      execution_number_limit = options.repeat
-
       if task.exit_code == 0:
         self.passed.append(task)
       else:
-        self.global_exit_code = task.exit_code
         self.failed.append(task)
-        execution_number_limit = max(options.repeat, options.repeat_failed)
 
-      if execution_number <= execution_number_limit:
-        self.register(Task(task.test_binary, task.test_name,
-                           task.test_command, execution_number + 1,
-                           task.last_execution_time, task.output_dir))
+  def run_task(self, task):
+    for _ in range(options.retry_failed + 1):
+      self.__register_start(task)
+      task.run()
+      self.__register_exit(task)
+
+      if task.exit_code == 0:
+        break
+
+      task = Task(task.test_binary, task.test_name, task.test_command,
+                  task.last_execution_time, task.output_dir)
+
+    with self.lock:
+      self.global_exit_code = task.exit_code
 
 
 class FilterFormat(object):
@@ -242,8 +245,8 @@ class FilterFormat(object):
       runtime_ms = 'Interrupted'
       if task.runtime_ms is not None:
         runtime_ms = '%d ms' % task.runtime_ms
-      self.out.permanent_line("%11s: %s %s" % (
-          runtime_ms, task.test_binary, task.test_name))
+      self.out.permanent_line("%11s: %s %s (try #%d)" % (
+          runtime_ms, task.test_binary, task.test_name, task.execution_number))
 
   def log_exit(self, task):
     with self.stdout_lock:
@@ -363,6 +366,7 @@ class TestTimes(object):
 
 def find_tests(binaries, additional_args):
   test_count = 0
+  tasks = []
   for test_binary in binaries:
     command = [test_binary]
     if options.gtest_also_run_disabled_tests:
@@ -403,10 +407,13 @@ def find_tests(binaries, additional_args):
 
       test_command = command + ['--gtest_filter=' + test_name]
       if (test_count - options.shard_index) % options.shard_count == 0:
-        task_manager.register(Task(test_binary, test_name, test_command, 1,
-                                   last_execution_time, options.output_dir))
+        for _ in range(options.repeat):
+         tasks.append(Task(test_binary, test_name, test_command,
+                           last_execution_time, options.output_dir))
 
       test_count += 1
+
+  return tasks
 
 
 def execute_tasks(tasks):
@@ -424,7 +431,7 @@ def execute_tasks(tasks):
             self.task_id += 1
           else:
             return
-        task_manager.start_task(task)
+        task_manager.run_task(task)
 
   def start_daemon(func):
     t = threading.Thread(target=func)
@@ -457,9 +464,9 @@ parser = optparse.OptionParser(
 parser.add_option('-d', '--output_dir', type='string',
                   default=os.path.join(tempfile.gettempdir(), "gtest-parallel"),
                   help='output directory for test logs')
-parser.add_option('--repeat', type='int', default=0,
-                  help='Number of times to repeat all tests.')
-parser.add_option('--repeat_failed', type='int', default=0,
+parser.add_option('-r', '--repeat', type='int', default=1,
+                  help='Number of times to execute all the tests.')
+parser.add_option('--retry_failed', type='int', default=0,
                   help='Number of times to repeat failed tests.')
 parser.add_option('--failed', action='store_true', default=False,
                   help='run only failed and new tests')
@@ -533,13 +540,9 @@ logger = FilterFormat(options.output_dir)
 
 task_manager = TaskManager(times, logger, test_results)
 
-find_tests(binaries, additional_args)
-
-tasks = task_manager.get_tasks_to_run()
-while tasks:
-  logger.log_tasks(len(tasks))
-  execute_tasks(tasks)
-  tasks = task_manager.get_tasks_to_run()
+tasks = find_tests(binaries, additional_args)
+logger.log_tasks(len(tasks))
+execute_tasks(tasks)
 
 if task_manager.passed:
   logger.move_to('passed', task_manager.passed)
@@ -556,9 +559,7 @@ if task_manager.started:
 
 logger.flush()
 times.write_to_file(save_file)
-
-if test_results:
-  test_results.dump_to_file_and_close()
+test_results.dump_to_file_and_close()
 
 if sigint_handler.got_sigint():
   task_manager.global_exit_code = -signal.SIGINT
