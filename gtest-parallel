@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import cPickle
-import collections
 import errno
 import gzip
 import json
@@ -118,6 +117,15 @@ class Outputter(object):
 
 
 class Task(object):
+  """Stores information about a task (single execution of a test).
+
+  This class stores information about the test to be executed (gtest binary and
+  test name), and its result (log file, exit code and runtime).
+  Each task is uniquely identified by the gtest binary, the test name and an
+  execution number that increases each time the test is executed.
+  Additionaly we store the last execution time, so that next time the test is
+  executed, the slowest tests are run first.
+  """
   def __init__(self, test_binary, test_name, test_command,
                last_execution_time, output_dir):
     self.test_name = test_name
@@ -162,6 +170,13 @@ class Task(object):
 
 
 class TaskManager(object):
+  """Executes the tasks and stores the passed, failed and interrupted tasks.
+
+  When a task is run, this class keeps track if it passed, failed or was
+  interrupted. After a task finishes it calls the relevant functions of the
+  Logger, TestResults and TestTimes classes, and in case of failure, retries the
+  test as specified by the --retry_failed flag.
+  """
   def __init__(self, times, logger, test_results):
     self.times = times
     self.logger = logger
@@ -196,7 +211,6 @@ class TaskManager(object):
 
     with self.lock:
       self.started.pop(task.task_id)
-
       if task.exit_code == 0:
         self.passed.append(task)
       else:
@@ -211,6 +225,8 @@ class TaskManager(object):
       if task.exit_code == 0:
         break
 
+      # We need create a new Task instance. Each task represents a single test
+      # execution, with its own runtime, exit code and log file.
       task = Task(task.test_binary, task.test_name, task.test_command,
                   task.last_execution_time, task.output_dir)
 
@@ -408,8 +424,8 @@ def find_tests(binaries, additional_args):
       test_command = command + ['--gtest_filter=' + test_name]
       if (test_count - options.shard_index) % options.shard_count == 0:
         for _ in range(options.repeat):
-         tasks.append(Task(test_binary, test_name, test_command,
-                           last_execution_time, options.output_dir))
+          tasks.append(Task(test_binary, test_name, test_command,
+                            last_execution_time, options.output_dir))
 
       test_count += 1
 
