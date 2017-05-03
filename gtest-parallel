@@ -575,7 +575,8 @@ if task_manager.started:
 
 logger.flush()
 times.write_to_file(save_file)
-test_results.dump_to_file_and_close()
+if test_results:
+  test_results.dump_to_file_and_close()
 
 if sigint_handler.got_sigint():
   task_manager.global_exit_code = -signal.SIGINT
