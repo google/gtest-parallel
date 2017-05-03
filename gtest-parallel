@@ -117,19 +117,32 @@ class Outputter(object):
 
 
 class Task(object):
-  def __init__(self, task_id, test_binary, test_name, test_command,
-               execution_number, last_execution_time, output_dir):
-    self.task_id = task_id
+  """Stores information about a task (single execution of a test).
+
+  This class stores information about the test to be executed (gtest binary and
+  test name), and its result (log file, exit code and runtime).
+  Each task is uniquely identified by the gtest binary, the test name and an
+  execution number that increases each time the test is executed.
+  Additionaly we store the last execution time, so that next time the test is
+  executed, the slowest tests are run first.
+  """
+  def __init__(self, test_binary, test_name, test_command,
+               last_execution_time, output_dir):
     self.test_name = test_name
+    self.output_dir = output_dir
     self.test_binary = test_binary
     self.test_command = test_command
-    self.execution_number = execution_number
     self.last_execution_time = last_execution_time
 
+    self.test_id = (test_binary, test_name)
+
+    self.execution_number = task_manager.get_next_execution_number(self.test_id)
     log_name = '%s-%s-%s.log' % (self.__normalize(test_binary),
-                                 self.__normalize(test_name), execution_number)
+                                 self.__normalize(test_name),
+                                 self.execution_number)
 
     self.log_file = os.path.join(output_dir, log_name)
+    self.task_id = (test_binary, test_name, self.execution_number)
 
     self.exit_code = None
     self.runtime_ms = None
@@ -145,7 +158,6 @@ class Task(object):
     return re.sub('[^A-Za-z0-9]', '_', string)
 
   def run(self):
-    logger.log_start(self.task_id)
     begin = time.time()
     with open(self.log_file, 'w') as log:
       task = subprocess.Popen(self.test_command, stdout=log, stderr=log)
@@ -155,70 +167,110 @@ class Task(object):
         thread.exit()
     self.runtime_ms = int(1000 * (time.time() - begin))
     self.last_execution_time = None if self.exit_code else self.runtime_ms
-    test_results.log(self.test_name, {
-        "expected": "PASS",
-        "actual": "PASS" if self.exit_code == 0 else "FAIL",
-        "time": self.runtime_ms,
-    })
-    logger.log_exit(self.task_id)
 
 
-stdout_lock = threading.Lock()
+class TaskManager(object):
+  """Executes the tasks and stores the passed, failed and interrupted tasks.
 
-class FilterFormat:
+  When a task is run, this class keeps track if it passed, failed or was
+  interrupted. After a task finishes it calls the relevant functions of the
+  Logger, TestResults and TestTimes classes, and in case of failure, retries the
+  test as specified by the --retry_failed flag.
+  """
+  def __init__(self, times, logger, test_results):
+    self.times = times
+    self.logger = logger
+    self.test_results = test_results
+
+    self.global_exit_code = 0
+
+    self.passed = []
+    self.failed = []
+    self.started = {}
+    self.execution_number = {}
+
+    self.lock = threading.Lock()
+
+  def get_next_execution_number(self, test_id):
+    with self.lock:
+      next_execution_number = self.execution_number.setdefault(test_id, 1)
+      self.execution_number[test_id] += 1
+    return next_execution_number
+
+  def __register_start(self, task):
+    with self.lock:
+      self.started[task.task_id] = task
+
+  def __register_exit(self, task):
+    self.logger.log_exit(task)
+    self.times.record_test_time(task.test_binary, task.test_name,
+                                task.last_execution_time)
+    if self.test_results:
+      test_results.log(task.test_name, task.runtime_ms,
+                       "PASS" if task.exit_code == 0 else "FAIL")
+
+    with self.lock:
+      self.started.pop(task.task_id)
+      if task.exit_code == 0:
+        self.passed.append(task)
+      else:
+        self.failed.append(task)
+
+  def run_task(self, task):
+    for _ in range(options.retry_failed + 1):
+      self.__register_start(task)
+      task.run()
+      self.__register_exit(task)
+
+      if task.exit_code == 0:
+        break
+
+      # We need create a new Task instance. Each task represents a single test
+      # execution, with its own runtime, exit code and log file.
+      task = Task(task.test_binary, task.test_name, task.test_command,
+                  task.last_execution_time, task.output_dir)
+
+    with self.lock:
+      self.global_exit_code = task.exit_code
+
+
+class FilterFormat(object):
   def __init__(self, output_dir):
     if sys.stdout.isatty():
       # stdout needs to be unbuffered since the output is interactive.
       sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 
     self.output_dir = output_dir
-    self.out = Outputter(sys.stdout)
+
     self.total_tasks = 0
     self.finished_tasks = 0
-    self.global_exit_code = 0
+    self.out = Outputter(sys.stdout)
+    self.stdout_lock = threading.Lock()
 
-    self.tasks = []
-    self.passed = []
-    self.failed = []
-    self.started = set()
-
-  def move_to(self, destination_dir, task_ids):
+  def move_to(self, destination_dir, tasks):
     destination_dir = os.path.join(self.output_dir, destination_dir)
     os.makedirs(destination_dir)
-    for task_id in task_ids:
-        shutil.move(self.tasks[task_id].log_file, destination_dir)
-
-  def print_tests(self, message, task_ids):
-    self.out.permanent_line("%s (%s/%s):" %
-                            (message, len(task_ids), self.total_tasks))
-    tasks = sorted(
-        (self.tasks[task_id].test_binary, self.tasks[task_id].test_name)
-        for task_id in task_ids)
     for task in tasks:
-      self.out.permanent_line(" %s: %s" % task)
+        shutil.move(task.log_file, destination_dir)
 
-  def print_test_status(self, last_finished_task, time_ms):
-    self.out.transient_line("[%d/%d] %s (%d ms)"
-                            % (self.finished_tasks, self.total_tasks,
-                               last_finished_task, time_ms))
 
-  def log_start(self, task_id):
-    self.started.add(task_id)
+  def print_tests(self, message, tasks):
+    self.out.permanent_line("%s (%s/%s):" %
+                            (message, len(tasks), self.total_tasks))
+    for task in sorted(tasks):
+      runtime_ms = 'Interrupted'
+      if task.runtime_ms is not None:
+        runtime_ms = '%d ms' % task.runtime_ms
+      self.out.permanent_line("%11s: %s %s (try #%d)" % (
+          runtime_ms, task.test_binary, task.test_name, task.execution_number))
 
-  def log_exit(self, task_id):
-    with stdout_lock:
-      self.started.remove(task_id)
+  def log_exit(self, task):
+    with self.stdout_lock:
       self.finished_tasks += 1
-
-      task = self.tasks[task_id]
-      self.print_test_status(task.test_name, task.runtime_ms)
-      times.record_test_time(task.test_binary, task.test_name,
-                             task.last_execution_time)
-      if task.exit_code == 0:
-        self.passed.append(task_id)
-      else:
-        self.global_exit_code = task.exit_code
-        self.failed.append(task_id)
+      self.out.transient_line("[%d/%d] %s (%d ms)"
+                              % (self.finished_tasks, self.total_tasks,
+                                 task.test_name, task.runtime_ms))
+      if task.exit_code != 0:
         with open(task.log_file) as f:
           for line in f.readlines():
             self.out.permanent_line(line.rstrip())
@@ -227,20 +279,11 @@ class FilterFormat:
           % (self.finished_tasks, self.total_tasks, task.test_name,
              task.exit_code, task.runtime_ms))
 
-  def log_tasks(self, tasks):
-    self.tasks = tasks
-    self.total_tasks = len(tasks)
+  def log_tasks(self, total_tasks):
+    self.total_tasks += total_tasks
     self.out.transient_line("[0/%d] Running tests..." % self.total_tasks)
 
-  def end(self):
-    if self.passed:
-      self.move_to('passed', self.passed)
-    if self.failed:
-      self.print_tests("FAILED TESTS", self.failed)
-      self.move_to('failed', self.failed)
-    if self.started:
-      self.print_tests("INTERRUPTED TESTS", self.started)
-      self.move_to('interrupted', self.started)
+  def flush(self):
     self.out.flush_transient_output()
 
 
@@ -262,23 +305,25 @@ class CollectTestResults(object):
         "tests": {},
     }
 
-  def log(self, test, result):
+  def log(self, test, runtime_ms, actual_result):
     with self.test_results_lock:
-      self.test_results['num_failures_by_type'][result['actual']] += 1
+      self.test_results['num_failures_by_type'][actual_result] += 1
       results = self.test_results['tests']
       for name in test.split('.'):
         results = results.setdefault(name, {})
-      results.update(result)
+
+      if results:
+        results['actual'] += ' ' + actual_result
+        results['times'].append(runtime_ms)
+      else:  # This is the first invocation of the test
+        results['actual'] = actual_result
+        results['times'] = [runtime_ms]
+        results['time'] = runtime_ms
+        results['expected'] = 'PASS'
 
   def dump_to_file_and_close(self):
     json.dump(self.test_results, self.json_dump_file)
     self.json_dump_file.close()
-
-class IgnoreTestResults(object):
-  def log(self, test, result):
-    pass
-  def dump_to_file_and_close(self):
-    pass
 
 class DummyTimer(object):
   def start(self):
@@ -378,11 +423,9 @@ def find_tests(binaries, additional_args):
 
       test_command = command + ['--gtest_filter=' + test_name]
       if (test_count - options.shard_index) % options.shard_count == 0:
-        for execution_number in range(options.repeat):
-          task_id = len(tasks)
-          tasks.append(Task(task_id, test_binary, test_name, test_command,
-                            execution_number + 1, last_execution_time,
-                            options.output_dir))
+        for _ in range(options.repeat):
+          tasks.append(Task(test_binary, test_name, test_command,
+                            last_execution_time, options.output_dir))
 
       test_count += 1
 
@@ -404,7 +447,7 @@ def execute_tasks(tasks):
             self.task_id += 1
           else:
             return
-        task.run()
+        task_manager.run_task(task)
 
   def start_daemon(func):
     t = threading.Thread(target=func)
@@ -438,7 +481,9 @@ parser.add_option('-d', '--output_dir', type='string',
                   default=os.path.join(tempfile.gettempdir(), "gtest-parallel"),
                   help='output directory for test logs')
 parser.add_option('-r', '--repeat', type='int', default=1,
-                  help='repeat tests')
+                  help='Number of times to execute all the tests.')
+parser.add_option('--retry_failed', type='int', default=0,
+                  help='Number of times to repeat failed tests.')
 parser.add_option('--failed', action='store_true', default=False,
                   help='run only failed and new tests')
 parser.add_option('-w', '--workers', type='int',
@@ -501,30 +546,37 @@ except OSError as e:
 timeout = (DummyTimer() if options.timeout is None
            else threading.Timer(options.timeout, sigint_handler.interrupt))
 
-test_results = (IgnoreTestResults() if options.dump_json_test_results is None
-                else CollectTestResults(options.dump_json_test_results))
+test_results = None
+if options.dump_json_test_results is not None:
+  test_results = CollectTestResults(options.dump_json_test_results)
 
 save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
 times = TestTimes(save_file)
-
 logger = FilterFormat(options.output_dir)
+
+task_manager = TaskManager(times, logger, test_results)
+
 tasks = find_tests(binaries, additional_args)
+logger.log_tasks(len(tasks))
+execute_tasks(tasks)
 
-logger.log_tasks(tasks)
+if task_manager.passed:
+  logger.move_to('passed', task_manager.passed)
+  if options.print_test_times:
+    logger.print_tests('PASSED TESTS', task_manager.passed)
 
-# Sort tests by falling runtime (with None, which is what we get for
-# new and failing tests, being considered larger than any real
-# runtime).
-execute_tasks(sorted(tasks))
+if task_manager.failed:
+  logger.print_tests('FAILED TESTS', task_manager.failed)
+  logger.move_to('failed', task_manager.failed)
 
-logger.end()
+if task_manager.started:
+  logger.print_tests('INTERRUPTED TESTS', task_manager.started.values())
+  logger.move_to('interrupted', task_manager.started.values())
+
+logger.flush()
 times.write_to_file(save_file)
-if options.print_test_times:
-  for task in sorted(tasks):
-    if task.last_execution_time is not None:
-      print "%8s %s" % ("%dms" % task.runtime_ms, task.test_name)
-
 test_results.dump_to_file_and_close()
+
 if sigint_handler.got_sigint():
-  logger.global_exit_code = -signal.SIGINT
-sys.exit(logger.global_exit_code)
+  task_manager.global_exit_code = -signal.SIGINT
+sys.exit(task_manager.global_exit_code)
