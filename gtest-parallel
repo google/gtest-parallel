@@ -217,7 +217,7 @@ class TaskManager(object):
         self.failed.append(task)
 
   def run_task(self, task):
-    for _ in range(options.retry_failed + 1):
+    for try_number in range(options.retry_failed + 1):
       self.__register_start(task)
       task.run()
       self.__register_exit(task)
@@ -225,13 +225,15 @@ class TaskManager(object):
       if task.exit_code == 0:
         break
 
-      # We need create a new Task instance. Each task represents a single test
-      # execution, with its own runtime, exit code and log file.
-      task = Task(task.test_binary, task.test_name, task.test_command,
-                  task.last_execution_time, task.output_dir)
+      if try_number < options.retry_failed:
+        # We need create a new Task instance. Each task represents a single test
+        # execution, with its own runtime, exit code and log file.
+        task = Task(task.test_binary, task.test_name, task.test_command,
+                    task.last_execution_time, task.output_dir)
 
     with self.lock:
-      self.global_exit_code = task.exit_code
+      if task.exit_code != 0:
+        self.global_exit_code = task.exit_code
 
 
 class FilterFormat(object):
