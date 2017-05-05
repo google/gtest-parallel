@@ -467,119 +467,130 @@ def execute_tasks(tasks):
     timeout.cancel()
 
 
-# Remove additional arguments (anything after --).
-additional_args = []
+options = None
+times = None
+logger = None
+task_manager = None
+timeout = None
 
-for i in range(len(sys.argv)):
-  if sys.argv[i] == '--':
-    additional_args = sys.argv[i+1:]
-    sys.argv = sys.argv[:i]
-    break
+def main():
+  global options, times, logger, task_manager, timeout
+  # Remove additional arguments (anything after --).
+  additional_args = []
 
-parser = optparse.OptionParser(
-    usage = 'usage: %prog [options] binary [binary ...] -- [additional args]')
+  for i in range(len(sys.argv)):
+    if sys.argv[i] == '--':
+      additional_args = sys.argv[i+1:]
+      sys.argv = sys.argv[:i]
+      break
 
-parser.add_option('-d', '--output_dir', type='string',
-                  default=os.path.join(tempfile.gettempdir(), "gtest-parallel"),
-                  help='output directory for test logs')
-parser.add_option('-r', '--repeat', type='int', default=1,
-                  help='Number of times to execute all the tests.')
-parser.add_option('--retry_failed', type='int', default=0,
-                  help='Number of times to repeat failed tests.')
-parser.add_option('--failed', action='store_true', default=False,
-                  help='run only failed and new tests')
-parser.add_option('-w', '--workers', type='int',
-                  default=multiprocessing.cpu_count(),
-                  help='number of workers to spawn')
-parser.add_option('--gtest_color', type='string', default='yes',
-                  help='color output')
-parser.add_option('--gtest_filter', type='string', default='',
-                  help='test filter')
-parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
-                  default=False, help='run disabled tests too')
-parser.add_option('--print_test_times', action='store_true', default=False,
-                  help='list the run time of each test at the end of execution')
-parser.add_option('--shard_count', type='int', default=1,
-                  help='total number of shards (for sharding test execution '
-                       'between multiple machines)')
-parser.add_option('--shard_index', type='int', default=0,
-                  help='zero-indexed number identifying this shard (for '
-                       'sharding test execution between multiple machines)')
-parser.add_option('--dump_json_test_results', type='string', default=None,
-                  help='Saves the results of the tests as a JSON machine-'
-                       'readable file. The format of the file is specified at '
-                       'https://www.chromium.org/developers/the-json-test-results-format')
-parser.add_option('--timeout', type='int', default=None,
-                  help='Interrupt all remaining processes after the given '
-                       'time (in seconds).')
+  parser = optparse.OptionParser(
+      usage = 'usage: %prog [options] binary [binary ...] -- [additional args]')
 
-(options, binaries) = parser.parse_args()
+  parser.add_option('-d', '--output_dir', type='string',
+                    default=os.path.join(tempfile.gettempdir(), "gtest-parallel"),
+                    help='output directory for test logs')
+  parser.add_option('-r', '--repeat', type='int', default=1,
+                    help='Number of times to execute all the tests.')
+  parser.add_option('--retry_failed', type='int', default=0,
+                    help='Number of times to repeat failed tests.')
+  parser.add_option('--failed', action='store_true', default=False,
+                    help='run only failed and new tests')
+  parser.add_option('-w', '--workers', type='int',
+                    default=multiprocessing.cpu_count(),
+                    help='number of workers to spawn')
+  parser.add_option('--gtest_color', type='string', default='yes',
+                    help='color output')
+  parser.add_option('--gtest_filter', type='string', default='',
+                    help='test filter')
+  parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
+                    default=False, help='run disabled tests too')
+  parser.add_option('--print_test_times', action='store_true', default=False,
+                    help='list the run time of each test at the end of execution')
+  parser.add_option('--shard_count', type='int', default=1,
+                    help='total number of shards (for sharding test execution '
+                         'between multiple machines)')
+  parser.add_option('--shard_index', type='int', default=0,
+                    help='zero-indexed number identifying this shard (for '
+                         'sharding test execution between multiple machines)')
+  parser.add_option('--dump_json_test_results', type='string', default=None,
+                    help='Saves the results of the tests as a JSON machine-'
+                         'readable file. The format of the file is specified at '
+                         'https://www.chromium.org/developers/the-json-test-results-format')
+  parser.add_option('--timeout', type='int', default=None,
+                    help='Interrupt all remaining processes after the given '
+                         'time (in seconds).')
 
-if binaries == []:
-  parser.print_usage()
-  sys.exit(1)
+  (options, binaries) = parser.parse_args()
 
-if options.shard_count < 1:
-  parser.error("Invalid number of shards: %d. Must be at least 1." %
-               options.shard_count)
-if not (0 <= options.shard_index < options.shard_count):
-  parser.error("Invalid shard index: %d. Must be between 0 and %d "
-               "(less than the number of shards)." %
-               (options.shard_index, options.shard_count - 1))
+  if binaries == []:
+    parser.print_usage()
+    sys.exit(1)
 
-# Check that all test binaries have an unique basename. That way we can ensure
-# the logs are saved to unique files even when two different binaries have
-# common tests.
-unique_binaries = set(os.path.basename(binary) for binary in binaries)
-assert len(unique_binaries) == len(binaries), (
-    "All test binaries must have an unique basename.")
+  if options.shard_count < 1:
+    parser.error("Invalid number of shards: %d. Must be at least 1." %
+                 options.shard_count)
+  if not (0 <= options.shard_index < options.shard_count):
+    parser.error("Invalid shard index: %d. Must be between 0 and %d "
+                 "(less than the number of shards)." %
+                 (options.shard_index, options.shard_count - 1))
 
-# Remove files from old test runs.
-if os.path.isdir(options.output_dir):
-  shutil.rmtree(options.output_dir)
-# Create directory for test log output.
-try:
-  os.makedirs(options.output_dir)
-except OSError as e:
-  # Ignore errors if this directory already exists.
-  if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
-    raise e
+  # Check that all test binaries have an unique basename. That way we can ensure
+  # the logs are saved to unique files even when two different binaries have
+  # common tests.
+  unique_binaries = set(os.path.basename(binary) for binary in binaries)
+  assert len(unique_binaries) == len(binaries), (
+      "All test binaries must have an unique basename.")
 
-timeout = (DummyTimer() if options.timeout is None
-           else threading.Timer(options.timeout, sigint_handler.interrupt))
+  # Remove files from old test runs.
+  if os.path.isdir(options.output_dir):
+    shutil.rmtree(options.output_dir)
+  # Create directory for test log output.
+  try:
+    os.makedirs(options.output_dir)
+  except OSError as e:
+    # Ignore errors if this directory already exists.
+    if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
+      raise e
 
-test_results = None
-if options.dump_json_test_results is not None:
-  test_results = CollectTestResults(options.dump_json_test_results)
+  timeout = (DummyTimer() if options.timeout is None
+             else threading.Timer(options.timeout, sigint_handler.interrupt))
 
-save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
-times = TestTimes(save_file)
-logger = FilterFormat(options.output_dir)
+  test_results = None
+  if options.dump_json_test_results is not None:
+    test_results = CollectTestResults(options.dump_json_test_results)
 
-task_manager = TaskManager(times, logger, test_results)
+  save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
+  times = TestTimes(save_file)
+  logger = FilterFormat(options.output_dir)
 
-tasks = find_tests(binaries, additional_args)
-logger.log_tasks(len(tasks))
-execute_tasks(tasks)
+  task_manager = TaskManager(times, logger, test_results)
 
-if task_manager.passed:
-  logger.move_to('passed', task_manager.passed)
-  if options.print_test_times:
-    logger.print_tests('PASSED TESTS', task_manager.passed)
+  tasks = find_tests(binaries, additional_args)
+  logger.log_tasks(len(tasks))
+  execute_tasks(tasks)
 
-if task_manager.failed:
-  logger.print_tests('FAILED TESTS', task_manager.failed)
-  logger.move_to('failed', task_manager.failed)
+  if task_manager.passed:
+    logger.move_to('passed', task_manager.passed)
+    if options.print_test_times:
+      logger.print_tests('PASSED TESTS', task_manager.passed)
 
-if task_manager.started:
-  logger.print_tests('INTERRUPTED TESTS', task_manager.started.values())
-  logger.move_to('interrupted', task_manager.started.values())
+  if task_manager.failed:
+    logger.print_tests('FAILED TESTS', task_manager.failed)
+    logger.move_to('failed', task_manager.failed)
 
-logger.flush()
-times.write_to_file(save_file)
-if test_results:
-  test_results.dump_to_file_and_close()
+  if task_manager.started:
+    logger.print_tests('INTERRUPTED TESTS', task_manager.started.values())
+    logger.move_to('interrupted', task_manager.started.values())
 
-if sigint_handler.got_sigint():
-  task_manager.global_exit_code = -signal.SIGINT
-sys.exit(task_manager.global_exit_code)
+  logger.flush()
+  times.write_to_file(save_file)
+  if test_results:
+    test_results.dump_to_file_and_close()
+
+  if sigint_handler.got_sigint():
+    task_manager.global_exit_code = -signal.SIGINT
+  sys.exit(task_manager.global_exit_code)
+
+if __name__ == '__main__':
+  sys.exit(main())
