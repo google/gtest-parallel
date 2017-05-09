@@ -1,5 +1,5 @@
 #!/usr/bin/env python2
-# Copyright 2017 Google Inc. All rights reserved.
+# Copyright 2013 Google Inc. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -589,8 +589,6 @@ def main():
     test_results.dump_to_file_and_close()
 
   if sigint_handler.got_sigint():
-    task_manager.global_exit_code = -signal.SIGINT
-  sys.exit(task_manager.global_exit_code)
+    return -signal.SIGINT
 
-if __name__ == '__main__':
-  sys.exit(main())
+  return task_manager.global_exit_code
