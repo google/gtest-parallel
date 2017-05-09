@@ -126,26 +126,26 @@ class Task(object):
   Additionaly we store the last execution time, so that next time the test is
   executed, the slowest tests are run first.
   """
-  def __init__(self, test_binary, test_name, test_command,
+  def __init__(self, test_binary, test_name, test_command, execution_number,
                last_execution_time, output_dir):
     self.test_name = test_name
     self.output_dir = output_dir
     self.test_binary = test_binary
     self.test_command = test_command
+    self.execution_number = execution_number
     self.last_execution_time = last_execution_time
 
-    self.test_id = (test_binary, test_name)
+    self.exit_code = None
+    self.runtime_ms = None
 
-    self.execution_number = task_manager.get_next_execution_number(self.test_id)
+    self.test_id = (test_binary, test_name)
+    self.task_id = (test_binary, test_name, self.execution_number)
+
     log_name = '%s-%s-%s.log' % (self.__normalize(test_binary),
                                  self.__normalize(test_name),
                                  self.execution_number)
 
     self.log_file = os.path.join(output_dir, log_name)
-    self.task_id = (test_binary, test_name, self.execution_number)
-
-    self.exit_code = None
-    self.runtime_ms = None
 
   def __lt__(self, other):
     if self.last_execution_time is None:
@@ -177,10 +177,13 @@ class TaskManager(object):
   Logger, TestResults and TestTimes classes, and in case of failure, retries the
   test as specified by the --retry_failed flag.
   """
-  def __init__(self, times, logger, test_results):
+  def __init__(self, times, logger, test_results, times_to_retry,
+               initial_execution_number):
     self.times = times
     self.logger = logger
     self.test_results = test_results
+    self.times_to_retry = times_to_retry
+    self.initial_execution_number = initial_execution_number
 
     self.global_exit_code = 0
 
@@ -191,9 +194,10 @@ class TaskManager(object):
 
     self.lock = threading.Lock()
 
-  def get_next_execution_number(self, test_id):
+  def __get_next_execution_number(self, test_id):
     with self.lock:
-      next_execution_number = self.execution_number.setdefault(test_id, 1)
+      next_execution_number = self.execution_number.setdefault(
+          test_id, self.initial_execution_number)
       self.execution_number[test_id] += 1
     return next_execution_number
 
@@ -217,7 +221,7 @@ class TaskManager(object):
         self.failed.append(task)
 
   def run_task(self, task):
-    for try_number in range(options.retry_failed + 1):
+    for try_number in range(self.times_to_retry + 1):
       self.__register_start(task)
       task.run()
       self.__register_exit(task)
@@ -225,11 +229,12 @@ class TaskManager(object):
       if task.exit_code == 0:
         break
 
-      if try_number < options.retry_failed:
+      if try_number < self.times_to_retry:
+        execution_number = self.__get_next_execution_number(task.test_id)
         # We need create a new Task instance. Each task represents a single test
         # execution, with its own runtime, exit code and log file.
         task = Task(task.test_binary, task.test_name, task.test_command,
-                    task.last_execution_time, task.output_dir)
+                    execution_number, task.last_execution_time, task.output_dir)
 
     with self.lock:
       if task.exit_code != 0:
@@ -382,7 +387,7 @@ class TestTimes(object):
       pass  # ignore errors---saving the times isn't that important
 
 
-def find_tests(binaries, additional_args):
+def find_tests(binaries, additional_args, options, times):
   test_count = 0
   tasks = []
   for test_binary in binaries:
@@ -425,16 +430,17 @@ def find_tests(binaries, additional_args):
 
       test_command = command + ['--gtest_filter=' + test_name]
       if (test_count - options.shard_index) % options.shard_count == 0:
-        for _ in range(options.repeat):
+        for execution_number in range(options.repeat):
           tasks.append(Task(test_binary, test_name, test_command,
-                            last_execution_time, options.output_dir))
+                            execution_number + 1, last_execution_time,
+                            options.output_dir))
 
       test_count += 1
 
   return tasks
 
 
-def execute_tasks(tasks):
+def execute_tasks(tasks, pool_size, task_manager, timeout):
   class WorkerFn(object):
     def __init__(self, tasks):
       self.task_id = 0
@@ -460,21 +466,14 @@ def execute_tasks(tasks):
   try:
     timeout.start()
     worker_fn = WorkerFn(tasks)
-    workers = [start_daemon(worker_fn) for _ in range(options.workers)]
+    workers = [start_daemon(worker_fn) for _ in range(pool_size)]
     for worker in workers:
       worker.join()
   finally:
     timeout.cancel()
 
 
-options = None
-times = None
-logger = None
-task_manager = None
-timeout = None
-
 def main():
-  global options, times, logger, task_manager, timeout
   # Remove additional arguments (anything after --).
   additional_args = []
 
@@ -564,11 +563,12 @@ def main():
   times = TestTimes(save_file)
   logger = FilterFormat(options.output_dir)
 
-  task_manager = TaskManager(times, logger, test_results)
+  task_manager = TaskManager(times, logger, test_results, options.retry_failed,
+                             options.repeat + 1)
 
-  tasks = find_tests(binaries, additional_args)
+  tasks = find_tests(binaries, additional_args, options, times)
   logger.log_tasks(len(tasks))
-  execute_tasks(tasks)
+  execute_tasks(tasks, options.workers, task_manager, timeout)
 
   if task_manager.passed:
     logger.move_to('passed', task_manager.passed)
