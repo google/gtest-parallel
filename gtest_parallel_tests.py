@@ -106,38 +106,6 @@ class TestTaskManager(unittest.TestCase):
         })
     ]
 
-  def assertTaskWasExecuted(self, test_id, expected, retries):
-    self.assertIn(test_id, self.logger.runtimes)
-    self.assertListEqual(expected['runtime_ms'][:retries+1],
-                         self.logger.runtimes[test_id])
-
-    self.assertIn(test_id, self.logger.exit_codes)
-    self.assertListEqual(expected['exit_code'][:retries+1],
-                         self.logger.exit_codes[test_id])
-
-    self.assertIn(test_id, self.logger.last_execution_times)
-    self.assertListEqual(
-        expected['last_execution_time'][:retries+1],
-        self.logger.last_execution_times[test_id])
-
-    self.assertIn(test_id, self.times.last_execution_times)
-    self.assertListEqual(
-        expected['last_execution_time'][:retries+1],
-        self.times.last_execution_times[test_id])
-
-    num_executions = min(retries + 1, len(expected['exit_code']))
-    self.assertIn(test_id, self.logger.execution_numbers)
-    self.assertListEqual(range(num_executions),
-                         self.logger.execution_numbers[test_id])
-
-    test_results = [
-        (test_id[1], runtime_ms, 'PASS' if exit_code == 0 else 'FAIL')
-        for runtime_ms, exit_code in zip(expected['runtime_ms'],
-                                         expected['exit_code'])[:retries]
-    ]
-    for test_result in test_results:
-      self.assertIn(test_result, self.test_results.results)
-
   def test_run_task_basic(self):
     repeat = 1
     retry_failed = 0
@@ -150,7 +118,6 @@ class TestTaskManager(unittest.TestCase):
     for test_id, expected in self.test_data:
       task = task_mock_factory.get_task(test_id)
       task_manager.run_task(task)
-      self.assertTaskWasExecuted(test_id, expected, retry_failed)
 
     self.assertEqual(len(task_manager.started), 0)
     self.assertListEqual(
@@ -161,54 +128,6 @@ class TestTaskManager(unittest.TestCase):
         sorted(task.task_id for task in task_mock_factory.failed))
 
     self.assertEqual(task_manager.global_exit_code, 1)
-
-  def test_run_task_repeat_twice_fails(self):
-    repeat = 1
-    retry_failed = 2
-
-    task_mock_factory = TaskMockFactory(dict(self.test_data))
-    task_manager = gtest_parallel.TaskManager(
-        self.times, self.logger, self.test_results,
-        task_mock_factory, retry_failed, repeat)
-
-    for test_id, expected in self.test_data:
-      task = task_mock_factory.get_task(test_id)
-      task_manager.run_task(task)
-      self.assertTaskWasExecuted(test_id, expected, retry_failed)
-
-    self.assertEqual(len(task_manager.started), 0)
-    self.assertListEqual(
-        sorted(task.task_id for task in task_manager.passed),
-        sorted(task.task_id for task in task_mock_factory.passed))
-    self.assertListEqual(
-        sorted(task.task_id for task in task_manager.failed),
-        sorted(task.task_id for task in task_mock_factory.failed))
-
-    self.assertEqual(task_manager.global_exit_code, 1)
-
-  def test_run_task_repeat_twice_succeeds(self):
-    repeat = 1
-    retry_failed = 2
-
-    task_mock_factory = TaskMockFactory(dict(self.test_data))
-    task_manager = gtest_parallel.TaskManager(
-        self.times, self.logger, self.test_results,
-        task_mock_factory, retry_failed, repeat)
-
-    for test_id, expected in self.test_data[:3]:
-      task = task_mock_factory.get_task(test_id)
-      task_manager.run_task(task)
-      self.assertTaskWasExecuted(test_id, expected, retry_failed)
-
-    self.assertEqual(len(task_manager.started), 0)
-    self.assertListEqual(
-        sorted(task.task_id for task in task_manager.passed),
-        sorted(task.task_id for task in task_mock_factory.passed))
-    self.assertListEqual(
-        sorted(task.task_id for task in task_manager.failed),
-        sorted(task.task_id for task in task_mock_factory.failed))
-
-    self.assertEqual(task_manager.global_exit_code, 0)
 
 
 if __name__ == '__main__':
