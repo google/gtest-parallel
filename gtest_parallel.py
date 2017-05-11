@@ -177,11 +177,12 @@ class TaskManager(object):
   Logger, TestResults and TestTimes classes, and in case of failure, retries the
   test as specified by the --retry_failed flag.
   """
-  def __init__(self, times, logger, test_results, times_to_retry,
+  def __init__(self, times, logger, test_results, task_factory, times_to_retry,
                initial_execution_number):
     self.times = times
     self.logger = logger
     self.test_results = test_results
+    self.task_factory = task_factory
     self.times_to_retry = times_to_retry
     self.initial_execution_number = initial_execution_number
 
@@ -233,8 +234,9 @@ class TaskManager(object):
         execution_number = self.__get_next_execution_number(task.test_id)
         # We need create a new Task instance. Each task represents a single test
         # execution, with its own runtime, exit code and log file.
-        task = Task(task.test_binary, task.test_name, task.test_command,
-                    execution_number, task.last_execution_time, task.output_dir)
+        task = self.task_factory(task.test_binary, task.test_name,
+                                 task.test_command, execution_number,
+                                 task.last_execution_time, task.output_dir)
 
     with self.lock:
       if task.exit_code != 0:
@@ -332,11 +334,6 @@ class CollectTestResults(object):
     json.dump(self.test_results, self.json_dump_file)
     self.json_dump_file.close()
 
-class DummyTimer(object):
-  def start(self):
-    pass
-  def cancel(self):
-    pass
 
 # Record of test runtimes. Has built-in locking.
 class TestTimes(object):
@@ -464,13 +461,15 @@ def execute_tasks(tasks, pool_size, task_manager, timeout):
     return t
 
   try:
-    timeout.start()
+    if timeout:
+      timeout.start()
     worker_fn = WorkerFn(tasks)
     workers = [start_daemon(worker_fn) for _ in range(pool_size)]
     for worker in workers:
       worker.join()
   finally:
-    timeout.cancel()
+    if timeout:
+      timeout.cancel()
 
 
 def main():
@@ -552,8 +551,9 @@ def main():
     if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
       raise e
 
-  timeout = (DummyTimer() if options.timeout is None
-             else threading.Timer(options.timeout, sigint_handler.interrupt))
+  timeout = None
+  if options.timeout is not None:
+    timeout = threading.Timer(options.timeout, sigint_handler.interrupt)
 
   test_results = None
   if options.dump_json_test_results is not None:
@@ -563,8 +563,8 @@ def main():
   times = TestTimes(save_file)
   logger = FilterFormat(options.output_dir)
 
-  task_manager = TaskManager(times, logger, test_results, options.retry_failed,
-                             options.repeat + 1)
+  task_manager = TaskManager(times, logger, test_results, Task,
+                             options.retry_failed, options.repeat + 1)
 
   tasks = find_tests(binaries, additional_args, options, times)
   logger.log_tasks(len(tasks))
