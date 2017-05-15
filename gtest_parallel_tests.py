@@ -30,6 +30,17 @@ class LoggerMock(object):
     self.last_execution_times[task.test_id].append(task.last_execution_time)
     self.execution_numbers[task.test_id].append(task.execution_number)
 
+  def assertRecorded(self, test_lib, test_id, expected, retries):
+    test_lib.assertIn(test_id, self.runtimes)
+    test_lib.assertListEqual(expected['runtime_ms'][:retries],
+                             self.runtimes[test_id])
+    test_lib.assertListEqual(expected['exit_code'][:retries],
+                             self.exit_codes[test_id])
+    test_lib.assertListEqual(expected['last_execution_time'][:retries],
+                             self.last_execution_times[test_id])
+    test_lib.assertListEqual(expected['execution_number'],
+                                  self.execution_numbers[test_id])
+
 
 class TimesMock(object):
   def __init__(self):
@@ -39,6 +50,11 @@ class TimesMock(object):
     test_id = (test_binary, test_name)
     self.last_execution_times[test_id].append(last_execution_time)
 
+  def assertRecorded(self, test_lib, test_id, expected, retries):
+    test_lib.assertIn(test_id, self.last_execution_times)
+    test_lib.assertListEqual(expected['last_execution_time'][:retries],
+                             self.last_execution_times[test_id])
+
 
 class TestResultsMock(object):
   def __init__(self):
@@ -46,6 +62,15 @@ class TestResultsMock(object):
 
   def log(self, test_name, runtime_ms, actual_result):
     self.results.append((test_name, runtime_ms, actual_result))
+
+  def assertRecorded(self, test_lib, test_id, expected, retries):
+    test_results = [
+        (test_id[1], runtime_ms, 'PASS' if exit_code == 0 else 'FAIL')
+        for runtime_ms, exit_code in zip(expected['runtime_ms'][:retries],
+                                         expected['exit_code'][:retries])
+    ]
+    for test_result in test_results:
+      test_lib.assertIn(test_result, self.results)
 
 
 class TaskMockFactory(object):
@@ -120,6 +145,11 @@ class TestTaskManager(unittest.TestCase):
         })
     ]
 
+  def assertTaskWasExecuted(self, test_id, expected, retries):
+    self.logger.assertRecorded(self, test_id, expected, retries)
+    self.times.assertRecorded(self,test_id, expected, retries)
+    self.test_results.assertRecorded(self,test_id, expected, retries)
+
   def test_run_task_basic(self):
     repeat = 1
     retry_failed = 0
@@ -132,6 +162,8 @@ class TestTaskManager(unittest.TestCase):
     for test_id, expected in self.test_data:
       task = task_mock_factory.get_task(test_id)
       task_manager.run_task(task)
+      expected['execution_number'] = range(retry_failed + 1)
+      self.assertTaskWasExecuted(test_id, expected, retry_failed + 1)
 
     self.assertEqual(len(task_manager.started), 0)
     self.assertListEqual(
