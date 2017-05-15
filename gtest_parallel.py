@@ -518,6 +518,10 @@ def main():
   parser.add_option('--timeout', type='int', default=None,
                     help='Interrupt all remaining processes after the given '
                          'time (in seconds).')
+  parser.add_option('--tests_times_output_dir', type='string',
+                    default=os.path.expanduser('~'),
+                    help='output directory for saving results of previous '
+                         'tests\' runs')
 
   (options, binaries) = parser.parse_args()
 
@@ -559,7 +563,8 @@ def main():
   if options.dump_json_test_results is not None:
     test_results = CollectTestResults(options.dump_json_test_results)
 
-  save_file = os.path.join(os.path.expanduser("~"), ".gtest-parallel-times")
+  save_file = os.path.join(options.tests_times_output_dir,
+                           '.gtest-parallel-times')
   times = TestTimes(save_file)
   logger = FilterFormat(options.output_dir)
 
