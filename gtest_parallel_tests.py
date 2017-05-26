@@ -114,57 +114,50 @@ class TaskMock(object):
 
 class TestTaskManager(unittest.TestCase):
   def setUp(self):
-    self.times = TimesMock()
-    self.logger = LoggerMock()
-    self.test_results = TestResultsMock()
-
-    self.test_data = [
-        # Passing task
-        (('fake_binary', 'Fake.PassingTest'), {
+    self.passing_task = (
+        ('fake_binary', 'Fake.PassingTest'), {
             'runtime_ms': [10],
             'exit_code': [0],
             'last_execution_time': [10],
-        }),
-        # Fails once, then succeeds
-        (('another_binary', 'Fake.Test.FailOnce'), {
-            'runtime_ms': [21, 22],
-            'exit_code': [3, 0],
-            'last_execution_time': [None, 22],
-        }),
-        # Fails twice, then succeeds
-        (('yet_another_binary', 'Fake.Test.FailTwice'), {
-            'runtime_ms': [23, 25, 24],
-            'exit_code': [4, 4, 0],
-            'last_execution_time': [None, None, 24],
-        }),
-        # Failing task
-        (('fake_binary', 'Fake.FailingTest'), {
+        })
+    self.failing_task = (
+        ('fake_binary', 'Fake.FailingTest'), {
             'runtime_ms': [20, 30, 40],
             'exit_code': [1, 2, 3],
             'last_execution_time': [None, None, None],
         })
-    ]
+    self.fails_once_then_succeeds = (
+        ('another_binary', 'Fake.Test.FailOnce'), {
+            'runtime_ms': [21, 22],
+            'exit_code': [3, 0],
+            'last_execution_time': [None, 22],
+        })
+    self.fails_twice_then_succeeds = (
+        ('yet_another_binary', 'Fake.Test.FailTwice'), {
+            'runtime_ms': [23, 25, 24],
+            'exit_code': [4, 4, 0],
+            'last_execution_time': [None, None, 24],
+        })
 
-  def assertTaskWasExecuted(self, test_id, expected, retries):
-    self.logger.assertRecorded(self, test_id, expected, retries)
-    self.times.assertRecorded(self,test_id, expected, retries)
-    self.test_results.assertRecorded(self,test_id, expected, retries)
-
-  def retry_failed_n_times(self, retry_failed, n_tasks, expected_exit_code):
+  def execute_tasks(self, tasks, retries, expected_exit_code):
     repeat = 1
 
-    task_mock_factory = TaskMockFactory(dict(self.test_data))
-    task_manager = gtest_parallel.TaskManager(
-        self.times, self.logger, self.test_results,
-        task_mock_factory, retry_failed, repeat)
+    times = TimesMock()
+    logger = LoggerMock()
+    test_results = TestResultsMock()
 
-    for test_id, expected in self.test_data[:n_tasks]:
-      if expected_exit_code == 0:
-        print test_id, expected
+    task_mock_factory = TaskMockFactory(dict(tasks))
+    task_manager = gtest_parallel.TaskManager(
+        times, logger, test_results, task_mock_factory, retries, repeat)
+
+    for test_id, expected in tasks:
       task = task_mock_factory.get_task(test_id)
       task_manager.run_task(task)
       expected['execution_number'] = range(len(expected['exit_code']))
-      self.assertTaskWasExecuted(test_id, expected, retry_failed + 1)
+
+      logger.assertRecorded(self, test_id, expected, retries + 1)
+      times.assertRecorded(self, test_id, expected, retries + 1)
+      test_results.assertRecorded(self,test_id, expected, retries + 1)
 
     self.assertEqual(len(task_manager.started), 0)
     self.assertListEqual(
@@ -176,17 +169,38 @@ class TestTaskManager(unittest.TestCase):
 
     self.assertEqual(task_manager.global_exit_code, expected_exit_code)
 
-  def test_run_task_basic(self):
-    self.retry_failed_n_times(0, 4, 1)
+  def test_passing_task_succeeds(self):
+    self.execute_tasks(tasks=[self.passing_task], retries=0,
+                       expected_exit_code=0)
 
-  def test_run_task_retry_failed_once(self):
-    self.retry_failed_n_times(1, 4, 2)
+  def test_failing_task_fails(self):
+    self.execute_tasks(tasks=[self.failing_task], retries=0,
+                       expected_exit_code=1)
 
-  def test_run_task_retry_failed_twice(self):
-    self.retry_failed_n_times(2, 4, 3)
+  def test_failing_task_fails_even_with_retries(self):
+    self.execute_tasks(tasks=[self.failing_task], retries=2,
+                       expected_exit_code=3)
 
-  def test_run_task_retry_failed_twice_all_pass(self):
-    self.retry_failed_n_times(2, 3, 0)
+  def test_executing_passing_and_failing_fails(self):
+    self.execute_tasks(tasks=[self.failing_task, self.passing_task],
+                       retries=2, expected_exit_code=3)
+
+    self.execute_tasks(tasks=[self.passing_task, self.failing_task],
+                       retries=2, expected_exit_code=3)
+
+  def test_task_that_fails_once_succeeds_with_two_attempts(self):
+    self.execute_tasks(tasks=[self.fails_once_then_succeeds],
+                       retries=1, expected_exit_code=0)
+
+  def test_task_that_fails_twice_fails_with_two_attempts(self):
+    self.execute_tasks(tasks=[self.fails_twice_then_succeeds],
+                       retries=1, expected_exit_code=4)
+
+  def test_all_tasks_eventually_succeed(self):
+    self.execute_tasks(tasks=[self.passing_task,
+                              self.fails_once_then_succeeds,
+                              self.fails_twice_then_succeeds],
+                       retries=2, expected_exit_code=0)
 
 if __name__ == '__main__':
   unittest.main()
