@@ -567,7 +567,10 @@ def main():
     default_cache_path = os.path.join(os.path.expanduser('~'), '.cache')
     cache_path = os.environ.get('XDG_CACHE_HOME', default_cache_path)
 
-  save_file = os.path.join(cache_path, 'gtest-parallel')
+  if os.path.isdir(cache_path):
+    save_file = os.path.join(cache_path, 'gtest-parallel')
+  else:
+    save_file = os.path.join(os.path.expanduser('~'), '.gtest-parallel-times')
 
   times = TestTimes(save_file)
   logger = FilterFormat(options.output_dir)
