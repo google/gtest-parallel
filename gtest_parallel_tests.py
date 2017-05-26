@@ -38,7 +38,7 @@ class LoggerMock(object):
                              self.exit_codes[test_id])
     test_lib.assertListEqual(expected['last_execution_time'][:retries],
                              self.last_execution_times[test_id])
-    test_lib.assertListEqual(expected['execution_number'],
+    test_lib.assertListEqual(expected['execution_number'][:retries],
                                   self.execution_numbers[test_id])
 
 
@@ -134,13 +134,13 @@ class TestTaskManager(unittest.TestCase):
         # Fails twice, then succeeds
         (('yet_another_binary', 'Fake.Test.FailTwice'), {
             'runtime_ms': [23, 25, 24],
-            'exit_code': [2, 2, 0],
+            'exit_code': [4, 4, 0],
             'last_execution_time': [None, None, 24],
         }),
         # Failing task
         (('fake_binary', 'Fake.FailingTest'), {
             'runtime_ms': [20, 30, 40],
-            'exit_code': [1, 1, 1],
+            'exit_code': [1, 2, 3],
             'last_execution_time': [None, None, None],
         })
     ]
@@ -150,19 +150,20 @@ class TestTaskManager(unittest.TestCase):
     self.times.assertRecorded(self,test_id, expected, retries)
     self.test_results.assertRecorded(self,test_id, expected, retries)
 
-  def test_run_task_basic(self):
+  def retry_failed_n_times(self, retry_failed, n_tasks, expected_exit_code):
     repeat = 1
-    retry_failed = 0
 
     task_mock_factory = TaskMockFactory(dict(self.test_data))
     task_manager = gtest_parallel.TaskManager(
         self.times, self.logger, self.test_results,
         task_mock_factory, retry_failed, repeat)
 
-    for test_id, expected in self.test_data:
+    for test_id, expected in self.test_data[:n_tasks]:
+      if expected_exit_code == 0:
+        print test_id, expected
       task = task_mock_factory.get_task(test_id)
       task_manager.run_task(task)
-      expected['execution_number'] = range(retry_failed + 1)
+      expected['execution_number'] = range(len(expected['exit_code']))
       self.assertTaskWasExecuted(test_id, expected, retry_failed + 1)
 
     self.assertEqual(len(task_manager.started), 0)
@@ -173,8 +174,19 @@ class TestTaskManager(unittest.TestCase):
         sorted(task.task_id for task in task_manager.failed),
         sorted(task.task_id for task in task_mock_factory.failed))
 
-    self.assertEqual(task_manager.global_exit_code, 1)
+    self.assertEqual(task_manager.global_exit_code, expected_exit_code)
 
+  def test_run_task_basic(self):
+    self.retry_failed_n_times(0, 4, 1)
+
+  def test_run_task_retry_failed_once(self):
+    self.retry_failed_n_times(1, 4, 2)
+
+  def test_run_task_retry_failed_twice(self):
+    self.retry_failed_n_times(2, 4, 3)
+
+  def test_run_task_retry_failed_twice_all_pass(self):
+    self.retry_failed_n_times(2, 3, 0)
 
 if __name__ == '__main__':
   unittest.main()
