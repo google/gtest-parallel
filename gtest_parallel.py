@@ -77,6 +77,7 @@ class SigintHandler(object):
     return code
 sigint_handler = SigintHandler()
 
+
 # Return the width of the terminal, or None if it couldn't be
 # determined (e.g. because we're not being run interactively).
 def term_width(out):
@@ -91,6 +92,7 @@ def term_width(out):
     return int(out.split()[1])
   except (IndexError, OSError, ValueError):
     return None
+
 
 # Output transient and permanent lines of text. If several transient
 # lines are written in sequence, the new will overwrite the old. We
@@ -114,6 +116,24 @@ class Outputter(object):
   def permanent_line(self, msg):
     self.flush_transient_output()
     self.__out_file.write(msg + "\n")
+
+
+def get_save_file_path():
+  """Return path to file for saving transient data."""
+  if sys.platform == 'win32':
+    default_cache_path = os.path.join(os.path.expanduser('~'),
+                                      'AppData', 'Local')
+    cache_path = os.environ.get('LOCALAPPDATA', default_cache_path)
+  else:
+    # We don't use xdg module since it's not a standard.
+    default_cache_path = os.path.join(os.path.expanduser('~'), '.cache')
+    cache_path = os.environ.get('XDG_CACHE_HOME', default_cache_path)
+
+  if os.path.isdir(cache_path):
+    return os.path.join(cache_path, 'gtest-parallel')
+  else:
+    sys.stderr.write('Directory {} does not exist'.format(cache_path))
+    return os.path.join(os.path.expanduser('~'), '.gtest-parallel-times')
 
 
 class Task(object):
@@ -559,18 +579,7 @@ def main():
   if options.dump_json_test_results is not None:
     test_results = CollectTestResults(options.dump_json_test_results)
 
-  if sys.platform == 'win32':
-    default_cache_path = os.path.join(os.path.expanduser('~'), 'AppData', 'Local')
-    cache_path = os.environ.get('LOCALAPPDATA', default_cache_path)
-  else:
-    # We don't use xdg module since it's not a standard.
-    default_cache_path = os.path.join(os.path.expanduser('~'), '.cache')
-    cache_path = os.environ.get('XDG_CACHE_HOME', default_cache_path)
-
-  if os.path.isdir(cache_path):
-    save_file = os.path.join(cache_path, 'gtest-parallel')
-  else:
-    save_file = os.path.join(os.path.expanduser('~'), '.gtest-parallel-times')
+  save_file = get_save_file_path()
 
   times = TestTimes(save_file)
   logger = FilterFormat(options.output_dir)

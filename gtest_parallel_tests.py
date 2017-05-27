@@ -13,7 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
+import contextlib
 import gtest_parallel
+import os.path
+import sys
 import unittest
 
 
@@ -87,6 +90,19 @@ class TaskMock(object):
     pass
 
 
+@contextlib.contextmanager
+def guard_environ(var, val):
+    try:
+        old_val = os.environ.get(var)
+        os.environ[var] = val
+        yield
+    finally:
+        if old_val is None:
+            del os.environ[var]
+        else:
+            os.environ[var] = old_val
+
+
 class TestTaskManager(unittest.TestCase):
   def setUp(self):
     self.times = TimesMock()
@@ -143,6 +159,35 @@ class TestTaskManager(unittest.TestCase):
 
     self.assertEqual(task_manager.global_exit_code, 1)
 
+  @unittest.skipIf(sys.platform == 'win32', 'non-Windows specific')
+  def test_get_save_file_path_unix(self):
+    self.assertEqual(os.path.join(os.path.expanduser('~'),
+                                  '.cache', 'gtest-parallel'),
+                     gtest_parallel.get_save_file_path())
+
+    with guard_environ('XDG_CACHE_HOME', os.getcwd()):
+      self.assertEqual(os.path.join(os.getcwd(), 'gtest-parallel'),
+                       gtest_parallel.get_save_file_path())
+
+    with guard_environ('XDG_CACHE_HOME', os.path.realpath(__file__)):
+      self.assertEqual(os.path.join(os.path.expanduser('~'),
+                                    '.gtest-parallel-times'),
+                       gtest_parallel.get_save_file_path())
+
+  @unittest.skipUnless(sys.platform == 'win32', 'Windows specific')
+  def test_get_save_file_path_win32(self):
+    self.assertEqual(os.path.join(os.path.expanduser('~'),
+                                  'AppData', 'Local', 'gtest-parallel'),
+                     gtest_parallel.get_save_file_path())
+
+    with guard_environ('LOCALAPPDATA', os.getcwd()):
+      self.assertEqual(os.path.join(os.getcwd(), 'gtest-parallel'),
+                       gtest_parallel.get_save_file_path())
+
+    with guard_environ('LOCALAPPDATA', os.path.realpath(__file__)):
+      self.assertEqual(os.path.join(os.path.expanduser('~'),
+                                    '.gtest-parallel-times'),
+                       gtest_parallel.get_save_file_path())
 
 if __name__ == '__main__':
   unittest.main()
