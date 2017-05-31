@@ -123,19 +123,19 @@ class TestTaskManager(unittest.TestCase):
     self.failing_task = (
         ('fake_binary', 'Fake.FailingTest'), {
             'runtime_ms': [20, 30, 40],
-            'exit_code': [1, 2, 3],
+            'exit_code': [1, 1, 1],
             'last_execution_time': [None, None, None],
         })
     self.fails_once_then_succeeds = (
         ('another_binary', 'Fake.Test.FailOnce'), {
             'runtime_ms': [21, 22],
-            'exit_code': [3, 0],
+            'exit_code': [1, 0],
             'last_execution_time': [None, 22],
         })
     self.fails_twice_then_succeeds = (
         ('yet_another_binary', 'Fake.Test.FailTwice'), {
             'runtime_ms': [23, 25, 24],
-            'exit_code': [4, 4, 0],
+            'exit_code': [1, 1, 0],
             'last_execution_time': [None, None, 24],
         })
 
@@ -179,24 +179,33 @@ class TestTaskManager(unittest.TestCase):
 
   def test_failing_task_fails_even_with_retries(self):
     self.execute_tasks(tasks=[self.failing_task], retries=2,
-                       expected_exit_code=3)
+                       expected_exit_code=1)
 
   def test_executing_passing_and_failing_fails(self):
+    # Executing both a faling test and a passing one should make gtest-parallel
+    # fail, no matter if the failing task is run first or last.
     self.execute_tasks(tasks=[self.failing_task, self.passing_task],
-                       retries=2, expected_exit_code=3)
+                       retries=2, expected_exit_code=1)
 
     self.execute_tasks(tasks=[self.passing_task, self.failing_task],
-                       retries=2, expected_exit_code=3)
+                       retries=2, expected_exit_code=1)
 
-  def test_task_that_fails_once_succeeds_with_two_attempts(self):
+  def test_task_succeeds_with_one_retry(self):
+    # Executes test and retries once. The first run should fail and the second
+    # succeed, so gtest-parallel should succeed.
     self.execute_tasks(tasks=[self.fails_once_then_succeeds],
                        retries=1, expected_exit_code=0)
 
-  def test_task_that_fails_twice_fails_with_two_attempts(self):
+  def test_task_fails_with_one_retry(self):
+    # Executes test and retries once, not enough for the test to start passing,
+    # so gtest-parallel should return an error.
     self.execute_tasks(tasks=[self.fails_twice_then_succeeds],
-                       retries=1, expected_exit_code=4)
+                       retries=1, expected_exit_code=1)
 
-  def test_all_tasks_eventually_succeed(self):
+  def test_runner_succeeds_when_all_tasks_eventually_succeeds(self):
+    # Executes the test and retries twice. One test should pass in the first
+    # attempt, another should take two runs, and the last one should take three
+    # runs. All tests should succeed, so gtest-parallel should succeed too.
     self.execute_tasks(tasks=[self.passing_task,
                               self.fails_once_then_succeeds,
                               self.fails_twice_then_succeeds],
