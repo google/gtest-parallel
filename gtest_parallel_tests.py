@@ -16,7 +16,9 @@ import collections
 import contextlib
 import gtest_parallel
 import os.path
+import shutil
 import sys
+import tempfile
 import unittest
 
 
@@ -90,19 +92,6 @@ class TaskMock(object):
     pass
 
 
-@contextlib.contextmanager
-def guard_environ(var, val):
-    try:
-        old_val = os.environ.get(var)
-        os.environ[var] = val
-        yield
-    finally:
-        if old_val is None:
-            del os.environ[var]
-        else:
-            os.environ[var] = old_val
-
-
 class TestTaskManager(unittest.TestCase):
   def setUp(self):
     self.times = TimesMock()
@@ -159,35 +148,106 @@ class TestTaskManager(unittest.TestCase):
 
     self.assertEqual(task_manager.global_exit_code, 1)
 
-  @unittest.skipIf(sys.platform == 'win32', 'non-Windows specific')
+
+@contextlib.contextmanager
+def guard_environ(var, val):
+  try:
+    old_val = os.environ.get(var)
+    if val is None:
+      if old_val is not None:
+        del os.environ[var]
+    else:
+      os.environ[var] = val
+    yield old_val
+  finally:
+    if old_val is None:
+      if val is not None:
+        del os.environ[var]
+    else:
+      os.environ[var] = old_val
+
+
+@contextlib.contextmanager
+def guard_temp_dir():
+  try:
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+  finally:
+    shutil.rmtree(temp_dir)
+
+
+@contextlib.contextmanager
+def guard_temp_subdir(temp_dir, *path):
+  assert path, 'Path should not be empty'
+
+  try:
+    temp_subdir = os.path.join(temp_dir, *path)
+    os.makedirs(temp_subdir)
+    yield temp_subdir
+  finally:
+    shutil.rmtree(os.path.join(temp_dir, path[0]))
+
+
+@contextlib.contextmanager
+def guard_patch_module(import_name, new_val):
+  def patch(module, names, val):
+    if len(names) == 1:
+      old = getattr(module, names[0])
+      setattr(module, names[0], val)
+      return old
+    else:
+      return patch(getattr(module, names[0]), names[1:], val)
+
+  try:
+    old_val = patch(gtest_parallel, import_name.split('.'), new_val)
+    yield old_val
+  finally:
+    patch(gtest_parallel, import_name.split('.'), old_val)
+
+
+class TestSaveFilePath(unittest.TestCase):
+  class StreamMock(object):
+    def write(*args):
+      # Suppress any output.
+      pass
+
   def test_get_save_file_path_unix(self):
-    self.assertEqual(os.path.join(os.path.expanduser('~'),
-                                  '.cache', 'gtest-parallel'),
-                     gtest_parallel.get_save_file_path())
+    with guard_temp_dir() as temp_dir, \
+        guard_patch_module('os.path.expanduser', lambda p: temp_dir), \
+        guard_patch_module('sys.stderr', TestSaveFilePath.StreamMock()), \
+        guard_patch_module('sys.platform', 'darwin'):
+      with guard_environ('XDG_CACHE_HOME', None), \
+          guard_temp_subdir(temp_dir, '.cache'):
+        self.assertEqual(os.path.join(temp_dir, '.cache', 'gtest-parallel'),
+                         gtest_parallel.get_save_file_path())
 
-    with guard_environ('XDG_CACHE_HOME', os.getcwd()):
-      self.assertEqual(os.path.join(os.getcwd(), 'gtest-parallel'),
-                       gtest_parallel.get_save_file_path())
+      with guard_environ('XDG_CACHE_HOME', temp_dir):
+        self.assertEqual(os.path.join(temp_dir, 'gtest-parallel'),
+                         gtest_parallel.get_save_file_path())
 
-    with guard_environ('XDG_CACHE_HOME', os.path.realpath(__file__)):
-      self.assertEqual(os.path.join(os.path.expanduser('~'),
-                                    '.gtest-parallel-times'),
-                       gtest_parallel.get_save_file_path())
+      with guard_environ('XDG_CACHE_HOME', os.path.realpath(__file__)):
+        self.assertEqual(os.path.join(temp_dir, '.gtest-parallel-times'),
+                         gtest_parallel.get_save_file_path())
 
-  @unittest.skipUnless(sys.platform == 'win32', 'Windows specific')
   def test_get_save_file_path_win32(self):
-    self.assertEqual(os.path.join(os.path.expanduser('~'),
-                                  'AppData', 'Local', 'gtest-parallel'),
-                     gtest_parallel.get_save_file_path())
+    with guard_temp_dir() as temp_dir, \
+        guard_patch_module('os.path.expanduser', lambda p: temp_dir), \
+        guard_patch_module('sys.stderr', TestSaveFilePath.StreamMock()), \
+        guard_patch_module('sys.platform', 'win32'):
+      with guard_environ('LOCALAPPDATA', None), \
+          guard_temp_subdir(temp_dir, 'AppData', 'Local'):
+        self.assertEqual(os.path.join(temp_dir, 'AppData',
+                                      'Local', 'gtest-parallel'),
+                         gtest_parallel.get_save_file_path())
 
-    with guard_environ('LOCALAPPDATA', os.getcwd()):
-      self.assertEqual(os.path.join(os.getcwd(), 'gtest-parallel'),
-                       gtest_parallel.get_save_file_path())
+      with guard_environ('LOCALAPPDATA', temp_dir):
+        self.assertEqual(os.path.join(temp_dir, 'gtest-parallel'),
+                         gtest_parallel.get_save_file_path())
 
-    with guard_environ('LOCALAPPDATA', os.path.realpath(__file__)):
-      self.assertEqual(os.path.join(os.path.expanduser('~'),
-                                    '.gtest-parallel-times'),
-                       gtest_parallel.get_save_file_path())
+      with guard_environ('LOCALAPPDATA', os.path.realpath(__file__)):
+        self.assertEqual(os.path.join(temp_dir, '.gtest-parallel-times'),
+                         gtest_parallel.get_save_file_path())
+
 
 if __name__ == '__main__':
   unittest.main()
