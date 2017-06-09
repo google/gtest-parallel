@@ -150,24 +150,6 @@ class TestTaskManager(unittest.TestCase):
 
 
 @contextlib.contextmanager
-def guard_environ(var, val):
-  try:
-    old_val = os.environ.get(var)
-    if val is None:
-      if old_val is not None:
-        del os.environ[var]
-    else:
-      os.environ[var] = val
-    yield old_val
-  finally:
-    if old_val is None:
-      if val is not None:
-        del os.environ[var]
-    else:
-      os.environ[var] = old_val
-
-
-@contextlib.contextmanager
 def guard_temp_dir():
   try:
     temp_dir = tempfile.mkdtemp()
@@ -216,16 +198,17 @@ class TestSaveFilePath(unittest.TestCase):
         guard_patch_module('os.path.expanduser', lambda p: temp_dir), \
         guard_patch_module('sys.stderr', TestSaveFilePath.StreamMock()), \
         guard_patch_module('sys.platform', 'darwin'):
-      with guard_environ('XDG_CACHE_HOME', None), \
+      with guard_patch_module('os.environ', {}), \
           guard_temp_subdir(temp_dir, '.cache'):
         self.assertEqual(os.path.join(temp_dir, '.cache', 'gtest-parallel'),
                          gtest_parallel.get_save_file_path())
 
-      with guard_environ('XDG_CACHE_HOME', temp_dir):
+      with guard_patch_module('os.environ', {'XDG_CACHE_HOME': temp_dir}):
         self.assertEqual(os.path.join(temp_dir, 'gtest-parallel'),
                          gtest_parallel.get_save_file_path())
 
-      with guard_environ('XDG_CACHE_HOME', os.path.realpath(__file__)):
+      with guard_patch_module('os.environ',
+                              {'XDG_CACHE_HOME': os.path.realpath(__file__)}):
         self.assertEqual(os.path.join(temp_dir, '.gtest-parallel-times'),
                          gtest_parallel.get_save_file_path())
 
@@ -234,17 +217,18 @@ class TestSaveFilePath(unittest.TestCase):
         guard_patch_module('os.path.expanduser', lambda p: temp_dir), \
         guard_patch_module('sys.stderr', TestSaveFilePath.StreamMock()), \
         guard_patch_module('sys.platform', 'win32'):
-      with guard_environ('LOCALAPPDATA', None), \
+      with guard_patch_module('os.environ', {}), \
           guard_temp_subdir(temp_dir, 'AppData', 'Local'):
         self.assertEqual(os.path.join(temp_dir, 'AppData',
                                       'Local', 'gtest-parallel'),
                          gtest_parallel.get_save_file_path())
 
-      with guard_environ('LOCALAPPDATA', temp_dir):
+      with guard_patch_module('os.environ', {'LOCALAPPDATA': temp_dir}):
         self.assertEqual(os.path.join(temp_dir, 'gtest-parallel'),
                          gtest_parallel.get_save_file_path())
 
-      with guard_environ('LOCALAPPDATA', os.path.realpath(__file__)):
+      with guard_patch_module('os.environ',
+                              {'LOCALAPPDATA': os.path.realpath(__file__)}):
         self.assertEqual(os.path.join(temp_dir, '.gtest-parallel-times'),
                          gtest_parallel.get_save_file_path())
 
