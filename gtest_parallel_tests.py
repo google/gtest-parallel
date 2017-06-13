@@ -13,7 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
+import contextlib
 import gtest_parallel
+import os.path
+import shutil
+import sys
+import tempfile
 import unittest
 
 
@@ -210,6 +215,90 @@ class TestTaskManager(unittest.TestCase):
                               self.fails_once_then_succeeds,
                               self.fails_twice_then_succeeds],
                        retries=2, expected_exit_code=0)
+
+@contextlib.contextmanager
+def guard_temp_dir():
+  try:
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+  finally:
+    shutil.rmtree(temp_dir)
+
+
+@contextlib.contextmanager
+def guard_temp_subdir(temp_dir, *path):
+  assert path, 'Path should not be empty'
+
+  try:
+    temp_subdir = os.path.join(temp_dir, *path)
+    os.makedirs(temp_subdir)
+    yield temp_subdir
+  finally:
+    shutil.rmtree(os.path.join(temp_dir, path[0]))
+
+
+@contextlib.contextmanager
+def guard_patch_module(import_name, new_val):
+  def patch(module, names, val):
+    if len(names) == 1:
+      old = getattr(module, names[0])
+      setattr(module, names[0], val)
+      return old
+    else:
+      return patch(getattr(module, names[0]), names[1:], val)
+
+  try:
+    old_val = patch(gtest_parallel, import_name.split('.'), new_val)
+    yield old_val
+  finally:
+    patch(gtest_parallel, import_name.split('.'), old_val)
+
+
+class TestSaveFilePath(unittest.TestCase):
+  class StreamMock(object):
+    def write(*args):
+      # Suppress any output.
+      pass
+
+  def test_get_save_file_path_unix(self):
+    with guard_temp_dir() as temp_dir, \
+        guard_patch_module('os.path.expanduser', lambda p: temp_dir), \
+        guard_patch_module('sys.stderr', TestSaveFilePath.StreamMock()), \
+        guard_patch_module('sys.platform', 'darwin'):
+      with guard_patch_module('os.environ', {}), \
+          guard_temp_subdir(temp_dir, '.cache'):
+        self.assertEqual(os.path.join(temp_dir, '.cache', 'gtest-parallel'),
+                         gtest_parallel.get_save_file_path())
+
+      with guard_patch_module('os.environ', {'XDG_CACHE_HOME': temp_dir}):
+        self.assertEqual(os.path.join(temp_dir, 'gtest-parallel'),
+                         gtest_parallel.get_save_file_path())
+
+      with guard_patch_module('os.environ',
+                              {'XDG_CACHE_HOME': os.path.realpath(__file__)}):
+        self.assertEqual(os.path.join(temp_dir, '.gtest-parallel-times'),
+                         gtest_parallel.get_save_file_path())
+
+  def test_get_save_file_path_win32(self):
+    with guard_temp_dir() as temp_dir, \
+        guard_patch_module('os.path.expanduser', lambda p: temp_dir), \
+        guard_patch_module('sys.stderr', TestSaveFilePath.StreamMock()), \
+        guard_patch_module('sys.platform', 'win32'):
+      with guard_patch_module('os.environ', {}), \
+          guard_temp_subdir(temp_dir, 'AppData', 'Local'):
+        self.assertEqual(os.path.join(temp_dir, 'AppData',
+                                      'Local', 'gtest-parallel'),
+                         gtest_parallel.get_save_file_path())
+
+      with guard_patch_module('os.environ', {'LOCALAPPDATA': temp_dir}):
+        self.assertEqual(os.path.join(temp_dir, 'gtest-parallel'),
+                         gtest_parallel.get_save_file_path())
+
+      with guard_patch_module('os.environ',
+                              {'LOCALAPPDATA': os.path.realpath(__file__)}):
+        self.assertEqual(os.path.join(temp_dir, '.gtest-parallel-times'),
+                         gtest_parallel.get_save_file_path())
+
 
 if __name__ == '__main__':
   unittest.main()
