@@ -33,7 +33,7 @@ not working on), or tests that may not be able to run in parallel.
 ## Flakiness
 
 Flaky tests (tests that do not deterministically pass or fail) often cause a lot
-of developer pain. A test that fails only 1% of the time can be very hard to
+of developer headache. A test that fails only 1% of the time can be very hard to
 detect as flaky, and even harder to convince yourself of having fixed.
 
 `gtest-parallel` supports repeating individual tests (`--repeat=`), which can be
