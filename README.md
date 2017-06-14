@@ -3,11 +3,11 @@
 _This is not an official Google product._
 
 `gtest-parallel` is a script that executes [Google
-Test](https://github.com/google/googletest) binaries in parallel, providing
-good speedup on multi-core machines, especially for single-threaded tests, or
-tests that do otherwise not run at 100% CPU.
+Test](https://github.com/google/googletest) binaries in parallel,
+providing good speedup for single-threaded tests (on multi-core machines) and
+tests that do not run at 100% CPU (on single- or multi-core machines).
 
-The script works by listing all tests per-binary, and then executing them on
+The script works by listing the tests of each binary, and then executing them on
 workers in separate processes. This works fine so long as the tests are self
 contained and do not share resources (reading data is fine, writing to the same
 log file is probably not).
@@ -32,10 +32,9 @@ not working on), or tests that may not be able to run in parallel.
 
 ## Flakiness
 
-Flaky tests (tests that may pass or fail, often even if the underlying code is
-correct) often cause a lot of developer pain. A test that fails only 1% of the
-time can be very hard to detect as flaky, and even harder to convince yourself
-of having fixed.
+Flaky tests (tests that do not deterministically pass or fail) often cause a lot
+of developer pain. A test that fails only 1% of the time can be very hard to
+detect as flaky, and even harder to convince yourself of having fixed.
 
 `gtest-parallel` supports repeating individual tests (`--repeat=`), which can be
 very useful for flakiness testing. Some tests are also more flaky under high
@@ -55,5 +54,5 @@ tests that you are fixing.
 
 Note that repeated tests do run concurrently with themselves for efficiency, and
 as such they have problem writing to hard-coded files, even if they are only
-used by that single test. `tmpfile` and similar library functions are often your
-friends here.
+used by that single test. `tmpfile()` and similar library functions are often
+your friends here.
