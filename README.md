@@ -3,9 +3,9 @@
 _This is not an official Google product._
 
 `gtest-parallel` is a script that executes [Google
-Test](https://github.com/google/googletest) binaries in parallel,
-providing good speedup for single-threaded tests (on multi-core machines) and
-tests that do not run at 100% CPU (on single- or multi-core machines).
+Test](https://github.com/google/googletest) binaries in parallel, providing good
+speedup for single-threaded tests (on multi-core machines) and tests that do not
+run at 100% CPU (on single- or multi-core machines).
 
 The script works by listing the tests of each binary, and then executing them on
 workers in separate processes. This works fine so long as the tests are self
