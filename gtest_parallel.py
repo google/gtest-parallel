@@ -458,22 +458,40 @@ def find_tests(binaries, additional_args, options, times):
   return tasks
 
 
-def execute_tasks(tasks, pool_size, task_manager, timeout):
+def execute_tasks(tasks, pool_size, task_manager,
+                  timeout, serialize_test_cases):
   class WorkerFn(object):
-    def __init__(self, tasks):
-      self.task_id = 0
+    def __init__(self, tasks, running_groups):
       self.tasks = tasks
+      self.running_groups = running_groups
       self.task_lock = threading.Lock()
 
     def __call__(self):
       while True:
         with self.task_lock:
-          if self.task_id < len(self.tasks):
-            task = self.tasks[self.task_id]
-            self.task_id += 1
+          for task_id in range(len(self.tasks)):
+            task = self.tasks[task_id]
+
+            if self.running_groups is not None:
+              test_group = task.test_name.split('.')[0]
+              if test_group in self.running_groups:
+                # Try to find other non-running test group.
+                continue
+              else:
+                self.running_groups.add(test_group)
+
+            del self.tasks[task_id]
+            break
           else:
+            # Either there is no tasks left or number or remaining test
+            # cases (groups) is less than number or running threads.
             return
+
         task_manager.run_task(task)
+
+        if self.running_groups is not None:
+          with self.task_lock:
+            self.running_groups.remove(test_group)
 
   def start_daemon(func):
     t = threading.Thread(target=func)
@@ -484,7 +502,8 @@ def execute_tasks(tasks, pool_size, task_manager, timeout):
   try:
     if timeout:
       timeout.start()
-    worker_fn = WorkerFn(tasks)
+    running_groups = set() if serialize_test_cases else None
+    worker_fn = WorkerFn(tasks, running_groups)
     workers = [start_daemon(worker_fn) for _ in range(pool_size)]
     for worker in workers:
       worker.join()
@@ -539,6 +558,9 @@ def main():
   parser.add_option('--timeout', type='int', default=None,
                     help='Interrupt all remaining processes after the given '
                          'time (in seconds).')
+  parser.add_option('--serialize_test_cases', action='store_true',
+                    default=False, help='Do not run tests from the same test '
+                                        'case in parallel.')
 
   (options, binaries) = parser.parse_args()
 
@@ -590,7 +612,8 @@ def main():
 
   tasks = find_tests(binaries, additional_args, options, times)
   logger.log_tasks(len(tasks))
-  execute_tasks(tasks, options.workers, task_manager, timeout)
+  execute_tasks(tasks, options.workers, task_manager,
+                timeout, options.serialize_test_cases)
 
   print_try_number = options.retry_failed > 0 or options.repeat > 1
   if task_manager.passed:

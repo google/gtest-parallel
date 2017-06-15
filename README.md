@@ -56,3 +56,16 @@ Note that repeated tests do run concurrently with themselves for efficiency, and
 as such they have problem writing to hard-coded files, even if they are only
 used by that single test. `tmpfile()` and similar library functions are often
 your friends here.
+
+## Running Tests Within Test Cases Sequentially
+
+Sometimes tests within a single test case use globally-shared resources
+(hard-coded file paths, sockets, etc.) and cannot be run in parallel. Running
+such tests in parallel will either fail or be flaky (if they happen to not
+overlap during execution, they pass). So long as these resources are only shared
+within the same test case `gtest-parallel` can still provide some parallelism.
+
+For such binaries where test cases are independent, `gtest-parallel` provides
+`--serialize_test_cases` that runs tests within the same test case sequentially.
+While generally not providing as much speedup as fully parallel test execution,
+this permits such binaries to partially benefit from parallel execution.
