@@ -428,18 +428,27 @@ def find_tests(binaries, additional_args, options, times):
     for line in test_list.split('\n'):
       if not line.strip():
         continue
-      if line[0] != " ":
+      elif line[0] != " ":
         # Remove comments for typed tests and strip whitespace.
         test_group = line.split('#')[0].strip()
-        continue
-      # Remove comments for parameterized tests and strip whitespace.
-      line = line.split('#')[0].strip()
-      if not line:
-        continue
+        if not options.run_test_cases:
+          continue
 
-      test_name = test_group + line
-      if not options.gtest_also_run_disabled_tests and 'DISABLED_' in test_name:
-        continue
+        test_name = test_group + '*'
+        # Manually disable tests according to gtest_filter.
+        separator_index = options.gtest_filter.find('-')
+        if separator_index >= 0:
+          test_name += ':' + options.gtest_filter[separator_index:]
+      elif not options.run_test_cases:
+        # Remove comments for parameterized tests and strip whitespace.
+        line = line.split('#')[0].strip()
+        if not line:
+          continue
+
+        test_name = test_group + line
+        if (not options.gtest_also_run_disabled_tests and
+              'DISABLED_' in test_name):
+          continue
 
       last_execution_time = times.get_test_time(test_binary, test_name)
       if options.failed and last_execution_time is not None:
@@ -538,6 +547,9 @@ def main():
   parser.add_option('--timeout', type='int', default=None,
                     help='Interrupt all remaining processes after the given '
                          'time (in seconds).')
+  parser.add_option('--run_test_cases', action='store_true', default=False,
+                    help='run whole test cases in parallel '
+                         '(as opposed to individual tests)')
 
   (options, binaries) = parser.parse_args()
 
