@@ -454,7 +454,7 @@ def find_tests(binaries, additional_args, options, times):
 
       test_count += 1
 
-  return tasks
+  return sorted(tasks)
 
 
 def execute_tasks(tasks, pool_size, task_manager, timeout):
