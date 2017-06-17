@@ -283,15 +283,16 @@ class FilterFormat(object):
         shutil.move(task.log_file, destination_dir)
 
 
-  def print_tests(self, message, tasks):
+  def print_tests(self, message, tasks, print_try_number):
     self.out.permanent_line("%s (%s/%s):" %
                             (message, len(tasks), self.total_tasks))
     for task in sorted(tasks):
       runtime_ms = 'Interrupted'
       if task.runtime_ms is not None:
         runtime_ms = '%d ms' % task.runtime_ms
-      self.out.permanent_line("%11s: %s %s (try #%d)" % (
-          runtime_ms, task.test_binary, task.test_name, task.execution_number))
+      self.out.permanent_line("%11s: %s %s%s" % (
+          runtime_ms, task.test_binary, task.test_name,
+          (" (try #%d)" % task.execution_number) if print_try_number else ""))
 
   def log_exit(self, task):
     with self.stdout_lock:
@@ -591,17 +592,19 @@ def main():
   logger.log_tasks(len(tasks))
   execute_tasks(tasks, options.workers, task_manager, timeout)
 
+  print_try_number = options.retry_failed > 0 or options.repeat > 1
   if task_manager.passed:
     logger.move_to('passed', task_manager.passed)
     if options.print_test_times:
-      logger.print_tests('PASSED TESTS', task_manager.passed)
+      logger.print_tests('PASSED TESTS', task_manager.passed, print_try_number)
 
   if task_manager.failed:
-    logger.print_tests('FAILED TESTS', task_manager.failed)
+    logger.print_tests('FAILED TESTS', task_manager.failed, print_try_number)
     logger.move_to('failed', task_manager.failed)
 
   if task_manager.started:
-    logger.print_tests('INTERRUPTED TESTS', task_manager.started.values())
+    logger.print_tests(
+        'INTERRUPTED TESTS', task_manager.started.values(), print_try_number)
     logger.move_to('interrupted', task_manager.started.values())
 
   logger.flush()
