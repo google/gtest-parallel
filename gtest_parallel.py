@@ -428,27 +428,18 @@ def find_tests(binaries, additional_args, options, times):
     for line in test_list.split('\n'):
       if not line.strip():
         continue
-      elif line[0] != " ":
+      if line[0] != " ":
         # Remove comments for typed tests and strip whitespace.
         test_group = line.split('#')[0].strip()
-        if not options.run_test_cases:
-          continue
+        continue
+      # Remove comments for parameterized tests and strip whitespace.
+      line = line.split('#')[0].strip()
+      if not line:
+        continue
 
-        test_name = test_group + '*'
-        # Manually disable tests according to gtest_filter.
-        separator_index = options.gtest_filter.find('-')
-        if separator_index >= 0:
-          test_name += ':' + options.gtest_filter[separator_index:]
-      elif not options.run_test_cases:
-        # Remove comments for parameterized tests and strip whitespace.
-        line = line.split('#')[0].strip()
-        if not line:
-          continue
-
-        test_name = test_group + line
-        if (not options.gtest_also_run_disabled_tests and
-              'DISABLED_' in test_name):
-          continue
+      test_name = test_group + line
+      if not options.gtest_also_run_disabled_tests and 'DISABLED_' in test_name:
+        continue
 
       last_execution_time = times.get_test_time(test_binary, test_name)
       if options.failed and last_execution_time is not None:
@@ -466,22 +457,40 @@ def find_tests(binaries, additional_args, options, times):
   return tasks
 
 
-def execute_tasks(tasks, pool_size, task_manager, timeout):
+def execute_tasks(tasks, pool_size, task_manager,
+                  timeout, serialize_test_cases):
   class WorkerFn(object):
-    def __init__(self, tasks):
-      self.task_id = 0
+    def __init__(self, tasks, running_groups):
       self.tasks = tasks
+      self.running_groups = running_groups
       self.task_lock = threading.Lock()
 
     def __call__(self):
       while True:
         with self.task_lock:
-          if self.task_id < len(self.tasks):
-            task = self.tasks[self.task_id]
-            self.task_id += 1
+          for task_id in range(len(self.tasks)):
+            task = self.tasks[task_id]
+
+            if self.running_groups is not None:
+              test_group = task.test_name.split('.')[0]
+              if test_group in self.running_groups:
+                # Try to find other non-running test group.
+                continue
+              else:
+                self.running_groups.add(test_group)
+
+            del self.tasks[task_id]
+            break
           else:
+            # Either there is no tasks left or number or remaining test
+            # cases (groups) is less than number or running threads.
             return
+
         task_manager.run_task(task)
+
+        if self.running_groups is not None:
+          with self.task_lock:
+            self.running_groups.remove(test_group)
 
   def start_daemon(func):
     t = threading.Thread(target=func)
@@ -492,7 +501,8 @@ def execute_tasks(tasks, pool_size, task_manager, timeout):
   try:
     if timeout:
       timeout.start()
-    worker_fn = WorkerFn(tasks)
+    running_groups = set() if serialize_test_cases else None
+    worker_fn = WorkerFn(tasks, running_groups)
     workers = [start_daemon(worker_fn) for _ in range(pool_size)]
     for worker in workers:
       worker.join()
@@ -547,9 +557,9 @@ def main():
   parser.add_option('--timeout', type='int', default=None,
                     help='Interrupt all remaining processes after the given '
                          'time (in seconds).')
-  parser.add_option('--run_test_cases', action='store_true', default=False,
-                    help='run whole test cases in parallel '
-                         '(as opposed to individual tests)')
+  parser.add_option('--serialize_test_cases', action='store_true',
+                    default=False, help='make sure that tests from the same '
+                                        'test case are never run in parallel')
 
   (options, binaries) = parser.parse_args()
 
@@ -601,7 +611,8 @@ def main():
 
   tasks = find_tests(binaries, additional_args, options, times)
   logger.log_tasks(len(tasks))
-  execute_tasks(tasks, options.workers, task_manager, timeout)
+  execute_tasks(tasks, options.workers, task_manager,
+                timeout, options.serialize_test_cases)
 
   if task_manager.passed:
     logger.move_to('passed', task_manager.passed)
