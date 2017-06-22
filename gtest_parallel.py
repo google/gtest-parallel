@@ -558,8 +558,8 @@ def main():
                     help='Interrupt all remaining processes after the given '
                          'time (in seconds).')
   parser.add_option('--serialize_test_cases', action='store_true',
-                    default=False, help='make sure that tests from the same '
-                                        'test case are never run in parallel')
+                    default=False, help='Do not run tests from the same test '
+                                        'case in parallel.')
 
   (options, binaries) = parser.parse_args()
 

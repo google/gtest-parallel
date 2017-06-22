@@ -56,3 +56,17 @@ Note that repeated tests do run concurrently with themselves for efficiency, and
 as such they have problem writing to hard-coded files, even if they are only
 used by that single test. `tmpfile()` and similar library functions are often
 your friends here.
+
+## Running tests cases in parallel
+
+Sometimes tests in test case make system-wide changes in their
+`SetUp()/SetUpTestCase()` methods. Examples of such changes are opening sockets
+on fixed address:port, writing to files at fixed location, etc. Running such
+code in parallel processes most likely will fail. In order to avoid this
+situation `gtest-parallel` provides `--serialize_test_cases` capability.
+
+    # ./gtest-parallel --serialize_test_cases path/to/binary
+
+This option can be used along with other `gtest-parallel` options and it ensures
+that tests from the same test case are never run in parallel. Naturally this
+works as long as other tests cases do not do the same globally visible things.
