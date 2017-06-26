@@ -305,130 +305,96 @@ class TestSaveFilePath(unittest.TestCase):
 
 class TestSerializeTestCases(unittest.TestCase):
   class TaskManagerMock(object):
-    def __init__(self, group_checker):
-      self.group_checker = group_checker
+    def __init__(self):
+      self.running_groups = []
       self.check_lock = threading.Lock()
+
+      self.had_running_parallel_groups = False
+      self.total_tasks_run = 0
 
     def run_task(self, task):
       test_group = task.test_name.split('.')[0]
 
       with self.check_lock:
-        self.group_checker.add(test_group)
+        self.total_tasks_run += 1
+        if test_group in self.running_groups:
+          self.had_running_parallel_groups = True
+        self.running_groups.append(test_group)
 
       # Delay as if real test were run.
-      time.sleep(0.001 * task.execution_number)
+      time.sleep(0.001)
 
       with self.check_lock:
-        self.group_checker.remove(test_group)
-
-  def test_running_parallel_test_cases_with_multiple_executions(self):
-    max_number_of_test_cases = 4
-    max_number_of_tests_per_test_case = 32
-    max_number_of_tests_executions = 16
-    max_number_of_workers = 16
-
-    tasks = []
-    for test_case in range(max_number_of_test_cases):
-      for test_name in range(max_number_of_tests_per_test_case):
-        # All arguments for gtest_parallel.Task except for test_name and
-        # execution_number are fake.
-        test_name = 'TestCase{}.test{}'.format(test_case, test_name)
-        execution_number = random.randint(1, max_number_of_tests_executions)
-
-        tasks.append(gtest_parallel.Task(
-          'path/to/binary', test_name, ['path/to/binary', '--gtest_filter=*'],
-          execution_number, None, 'path/to/output'))
-
-    class GroupChecker(object):
-      def __init__(self, ut_self):
-        self.ut_self = ut_self
-        self.running_groups = set()
-
-      def add(self, test_group):
-        self.ut_self.assertNotIn(test_group, self.running_groups)
-
-        self.running_groups.add(test_group)
-
-      def remove(self, test_group):
         self.running_groups.remove(test_group)
 
-    task_manager = TestSerializeTestCases.TaskManagerMock(GroupChecker(self))
+  def _generate_tasks(self, number_of_test_cases,
+                      number_of_tests_per_test_case,
+                      number_of_repeats):
+    tasks = []
+    for test_case in range(number_of_test_cases):
+      for test_name in range(number_of_tests_per_test_case):
+        # All arguments for gtest_parallel.Task except for test_name are fake.
+        test_name = 'TestCase{}.test{}'.format(test_case, test_name)
+
+        for execution_number in range(random.randint(1, number_of_repeats)):
+          tasks.append(gtest_parallel.Task(
+            'path/to/binary', test_name, ['path/to/binary', '--gtest_filter=*'],
+            execution_number + 1, None, 'path/to/output'))
+
+    return tasks
+
+  def test_running_parallel_test_cases_without_repeats(self):
+    max_number_of_test_cases = 4
+    max_number_of_tests_per_test_case = 32
+    max_number_of_workers = 16
+
+    tasks = self._generate_tasks(max_number_of_test_cases,
+                                 max_number_of_tests_per_test_case, 1)
+    expected_tasks_number = len(tasks)
+
+    task_manager = TestSerializeTestCases.TaskManagerMock()
 
     gtest_parallel.execute_tasks(tasks, max_number_of_workers,
                                  task_manager, None, True)
+
+    self.assertFalse(task_manager.had_running_parallel_groups)
+    self.assertEqual(expected_tasks_number, task_manager.total_tasks_run)
 
   def test_running_parallel_test_cases_with_repeats(self):
     max_number_of_test_cases = 4
     max_number_of_tests_per_test_case = 32
-    max_number_of_repeats = 16
+    max_number_of_repeats = 8
     max_number_of_workers = 16
 
-    tasks = []
-    for test_case in range(max_number_of_test_cases):
-      for test_name in range(max_number_of_tests_per_test_case):
-        # All arguments for gtest_parallel.Task except for test_name are fake.
-        test_name = 'TestCase{}.test{}'.format(test_case, test_name)
+    tasks = self._generate_tasks(max_number_of_test_cases,
+                                 max_number_of_tests_per_test_case,
+                                 max_number_of_repeats)
+    expected_tasks_number = len(tasks)
 
-        for repeat in range(random.randint(1, max_number_of_repeats)):
-          tasks.append(gtest_parallel.Task(
-            'path/to/binary', test_name, ['path/to/binary', '--gtest_filter=*'],
-            1, None, 'path/to/output'))
-
-    class GroupChecker(object):
-      def __init__(self, ut_self):
-        self.ut_self = ut_self
-        self.running_groups = set()
-
-      def add(self, test_group):
-        self.ut_self.assertNotIn(test_group, self.running_groups)
-
-        self.running_groups.add(test_group)
-
-      def remove(self, test_group):
-        self.running_groups.remove(test_group)
-
-    task_manager = TestSerializeTestCases.TaskManagerMock(GroupChecker(self))
+    task_manager = TestSerializeTestCases.TaskManagerMock()
 
     gtest_parallel.execute_tasks(tasks, max_number_of_workers,
                                  task_manager, None, True)
+
+    self.assertFalse(task_manager.had_running_parallel_groups)
+    self.assertEqual(expected_tasks_number, task_manager.total_tasks_run)
 
   def test_running_parallel_tests(self):
     max_number_of_test_cases = 4
     max_number_of_tests_per_test_case = 128
     max_number_of_workers = 16
 
-    tasks = []
-    for test_case in range(max_number_of_test_cases):
-      for test_name in range(max_number_of_tests_per_test_case):
-        # All arguments for gtest_parallel.Task except for test_name are fake.
-        test_name = 'TestCase{}.test{}'.format(test_case, test_name)
+    tasks = self._generate_tasks(max_number_of_test_cases,
+                                 max_number_of_tests_per_test_case, 1)
+    expected_tasks_number = len(tasks)
 
-        tasks.append(gtest_parallel.Task(
-          'path/to/binary', test_name, ['path/to/binary', '--gtest_filter=*'],
-          1, None, 'path/to/output'))
-
-    class GroupChecker(object):
-      def __init__(self, ut_self):
-        self.ut_self = ut_self
-        self.running_groups = []
-        self.had_running_parallel_groups = False
-
-      def add(self, test_group):
-        self.running_groups.append(test_group)
-
-      def remove(self, test_group):
-        self.running_groups.remove(test_group)
-
-        self.had_running_parallel_groups = (
-          self.had_running_parallel_groups or test_group in self.running_groups)
-
-    checker = GroupChecker(self)
-    task_manager = TestSerializeTestCases.TaskManagerMock(checker)
+    task_manager = TestSerializeTestCases.TaskManagerMock()
 
     gtest_parallel.execute_tasks(tasks, max_number_of_workers,
                                  task_manager, None, False)
 
-    self.assertTrue(checker.had_running_parallel_groups)
+    self.assertTrue(task_manager.had_running_parallel_groups)
+    self.assertEqual(expected_tasks_number, task_manager.total_tasks_run)
 
 
 if __name__ == '__main__':
