@@ -327,74 +327,52 @@ class TestSerializeTestCases(unittest.TestCase):
       with self.check_lock:
         self.running_groups.remove(test_group)
 
-  def _generate_tasks(self, number_of_test_cases,
-                      number_of_tests_per_test_case,
-                      number_of_repeats):
+  def _execute_tasks(self, max_number_of_test_cases,
+                     max_number_of_tests_per_test_case,
+                     max_number_of_repeats, max_number_of_workers,
+                     serialize_test_cases):
     tasks = []
-    for test_case in range(number_of_test_cases):
-      for test_name in range(number_of_tests_per_test_case):
+    for test_case in range(max_number_of_test_cases):
+      for test_name in range(max_number_of_tests_per_test_case):
         # All arguments for gtest_parallel.Task except for test_name are fake.
         test_name = 'TestCase{}.test{}'.format(test_case, test_name)
 
-        for execution_number in range(random.randint(1, number_of_repeats)):
+        for execution_number in range(random.randint(1, max_number_of_repeats)):
           tasks.append(gtest_parallel.Task(
             'path/to/binary', test_name, ['path/to/binary', '--gtest_filter=*'],
             execution_number + 1, None, 'path/to/output'))
 
-    return tasks
+    expected_tasks_number = len(tasks)
+
+    task_manager = TestSerializeTestCases.TaskManagerMock()
+
+    gtest_parallel.execute_tasks(tasks, max_number_of_workers,
+                                 task_manager, None, serialize_test_cases)
+
+    self.assertEqual(serialize_test_cases,
+                     not task_manager.had_running_parallel_groups)
+    self.assertEqual(expected_tasks_number, task_manager.total_tasks_run)
 
   def test_running_parallel_test_cases_without_repeats(self):
-    max_number_of_test_cases = 4
-    max_number_of_tests_per_test_case = 32
-    max_number_of_workers = 16
-
-    tasks = self._generate_tasks(max_number_of_test_cases,
-                                 max_number_of_tests_per_test_case, 1)
-    expected_tasks_number = len(tasks)
-
-    task_manager = TestSerializeTestCases.TaskManagerMock()
-
-    gtest_parallel.execute_tasks(tasks, max_number_of_workers,
-                                 task_manager, None, True)
-
-    self.assertFalse(task_manager.had_running_parallel_groups)
-    self.assertEqual(expected_tasks_number, task_manager.total_tasks_run)
+    self._execute_tasks(max_number_of_test_cases=4,
+                        max_number_of_tests_per_test_case=32,
+                        max_number_of_repeats=1,
+                        max_number_of_workers=16,
+                        serialize_test_cases=True)
 
   def test_running_parallel_test_cases_with_repeats(self):
-    max_number_of_test_cases = 4
-    max_number_of_tests_per_test_case = 32
-    max_number_of_repeats = 8
-    max_number_of_workers = 16
-
-    tasks = self._generate_tasks(max_number_of_test_cases,
-                                 max_number_of_tests_per_test_case,
-                                 max_number_of_repeats)
-    expected_tasks_number = len(tasks)
-
-    task_manager = TestSerializeTestCases.TaskManagerMock()
-
-    gtest_parallel.execute_tasks(tasks, max_number_of_workers,
-                                 task_manager, None, True)
-
-    self.assertFalse(task_manager.had_running_parallel_groups)
-    self.assertEqual(expected_tasks_number, task_manager.total_tasks_run)
+    self._execute_tasks(max_number_of_test_cases=4,
+                        max_number_of_tests_per_test_case=32,
+                        max_number_of_repeats=4,
+                        max_number_of_workers=16,
+                        serialize_test_cases=True)
 
   def test_running_parallel_tests(self):
-    max_number_of_test_cases = 4
-    max_number_of_tests_per_test_case = 128
-    max_number_of_workers = 16
-
-    tasks = self._generate_tasks(max_number_of_test_cases,
-                                 max_number_of_tests_per_test_case, 1)
-    expected_tasks_number = len(tasks)
-
-    task_manager = TestSerializeTestCases.TaskManagerMock()
-
-    gtest_parallel.execute_tasks(tasks, max_number_of_workers,
-                                 task_manager, None, False)
-
-    self.assertTrue(task_manager.had_running_parallel_groups)
-    self.assertEqual(expected_tasks_number, task_manager.total_tasks_run)
+    self._execute_tasks(max_number_of_test_cases=4,
+                        max_number_of_tests_per_test_case=128,
+                        max_number_of_repeats=1,
+                        max_number_of_workers=16,
+                        serialize_test_cases=False)
 
 
 if __name__ == '__main__':
