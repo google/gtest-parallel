@@ -59,14 +59,10 @@ your friends here.
 
 ## Running tests cases in parallel
 
-Sometimes tests in test case make system-wide changes in their
-`SetUp()/SetUpTestCase()` methods. Examples of such changes are opening sockets
-on fixed address:port, writing to files at fixed location, etc. Running such
-code in parallel processes most likely will fail. In order to avoid this
-situation `gtest-parallel` provides `--serialize_test_cases` capability.
-
-    # ./gtest-parallel --serialize_test_cases path/to/binary
-
-This option can be used along with other `gtest-parallel` options and it ensures
-that tests from the same test case are never run in parallel. Naturally this
-works as long as other tests cases do not do the same globally visible things.
+Sometimes tests within a single test case use globally-shared resources (instead
+of temporary files or fake/mock objects) and cannot be run in parallel.
+Examples of such changes are opening sockets on fixed `address:port`, writing
+to files at fixed location, etc. Running such tests in parallel will either fail
+or be flaky. For test binaries where tests are not self contained, but test
+cases are, --serialize_test_cases can be provided to prevent them from running
+in parallel, while still benefiting from parallel speedup between test cases.
