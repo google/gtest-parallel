@@ -56,3 +56,13 @@ Note that repeated tests do run concurrently with themselves for efficiency, and
 as such they have problem writing to hard-coded files, even if they are only
 used by that single test. `tmpfile()` and similar library functions are often
 your friends here.
+
+## Running tests cases in parallel
+
+Sometimes tests within a single test case use globally-shared resources (instead
+of temporary files or fake/mock objects) and cannot be run in parallel.
+Examples of such changes are opening sockets on fixed `address:port`, writing
+to files at fixed location, etc. Running such tests in parallel will either fail
+or be flaky. For test binaries where tests are not self contained, but test
+cases are, --serialize_test_cases can be provided to prevent them from running
+in parallel, while still benefiting from parallel speedup between test cases.
