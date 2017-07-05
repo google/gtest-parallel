@@ -376,16 +376,18 @@ class TestSerializeTestCases(unittest.TestCase):
 
 class TestTestTimes(unittest.TestCase):
   def test_race_in_test_times_load_save(self):
-    max_number_of_workers = 16
-    max_numver_of_read_write_cycles = 128
+    max_number_of_workers = 1
+    max_number_of_read_write_cycles = 64
     test_times_file_name = 'test_times.pickle'
 
     def start_worker(save_file):
       def test_times_worker():
-        for _ in range(max_numver_of_read_write_cycles):
+        for cnt in range(max_number_of_read_write_cycles):
           times = gtest_parallel.TestTimes(save_file)
+          self.assertEqual(cnt, len(times._TestTimes__times))
 
-          times.record_test_time('path/to/binary', 'TestFoo.testBar', 1000)
+          times.record_test_time('path/to/binary{}'.format(cnt),
+                                 'TestFoo.testBar', 1000)
 
           times.write_to_file(save_file)
 

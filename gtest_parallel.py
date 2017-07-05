@@ -30,6 +30,12 @@ import threading
 import time
 import zlib
 
+if sys.platform == 'win32':
+  import msvcrt
+else:
+  import fcntl
+
+
 # An object that catches SIGINT sent to the Python process and notices
 # if processes passed to wait() die by SIGINT (we need to look for
 # both of those cases, because pressing Ctrl+C can result in either
@@ -358,6 +364,37 @@ class CollectTestResults(object):
 
 # Record of test runtimes. Has built-in locking.
 class TestTimes(object):
+  class LockedFile(object):
+    def __init__(self, filename, mode):
+      self._filename = filename
+      self._mode = mode
+      self._fo = None
+
+    def __enter__(self):
+      self._fo = open(self._filename, self._mode)
+
+      try:
+        if sys.platform == 'win32':
+          msvcrt.locking(self._fo.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+          fcntl.flock(self._fo.fileno(), fcntl.LOCK_EX)
+      except IOError:
+        self._fo.close()
+        raise
+
+      return self._fo
+
+    def __exit__(self, exc_type, exc_value, traceback):
+      try:
+        if sys.platform == 'win32':
+          msvcrt.locking(self._fo.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+          fcntl.flock(self._fo.fileno(), fcntl.LOCK_UN)
+      finally:
+        self._fo.close()
+
+      return exc_value is None
+
   def __init__(self, save_file):
     "Create new object seeded with saved test times from the given file."
     self.__times = {}  # (test binary, test name) -> runtime in ms
@@ -367,9 +404,10 @@ class TestTimes(object):
     self.__lock = threading.Lock()
 
     try:
-      with gzip.GzipFile(save_file, "rb") as f:
-        times = cPickle.load(f)
-    except (EOFError, IOError, cPickle.UnpicklingError, zlib.error):
+      with TestTimes.LockedFile(save_file, 'rb') as fd:
+        with gzip.GzipFile(fileobj=fd, mode='rb') as gzf:
+          times = cPickle.load(gzf)
+    except (EOFError, OSError, IOError, cPickle.UnpicklingError, zlib.error):
       # File doesn't exist, isn't readable, is malformed---whatever.
       # Just ignore it.
       return
@@ -398,9 +436,20 @@ class TestTimes(object):
   def write_to_file(self, save_file):
     "Write all the times to file."
     try:
-      with open(save_file, "wb") as f:
-        with gzip.GzipFile("", "wb", 9, f) as gzf:
-          cPickle.dump(self.__times, gzf, cPickle.HIGHEST_PROTOCOL)
+      with TestTimes.LockedFile(save_file, 'a+b') as fd:
+        fd.seek(0)
+        try:
+          with gzip.GzipFile(fileobj=fd, mode='rb') as gzf:
+            times = cPickle.load(gzf)
+
+          times.update(self.__times)
+        except (EOFError, IOError, cPickle.UnpicklingError, zlib.error):
+          times = self.__times
+
+        fd.seek(0)
+        fd.truncate()
+        with gzip.GzipFile(fileobj=fd, mode='wb') as gzf:
+          cPickle.dump(times, gzf, cPickle.HIGHEST_PROTOCOL)
     except IOError:
       pass  # ignore errors---saving the times isn't that important
 
