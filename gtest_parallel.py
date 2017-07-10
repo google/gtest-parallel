@@ -385,6 +385,11 @@ class TestTimes(object):
       return self._fo
 
     def __exit__(self, exc_type, exc_value, traceback):
+      # Flush any buffered data to disk. This is needed to prevent race
+      # which can happen from the moment of releasing file lock till
+      # closing the file.
+      self._fo.flush()
+
       try:
         if sys.platform == 'win32':
           msvcrt.locking(self._fo.fileno(), msvcrt.LK_UNLCK, 1)
@@ -405,11 +410,9 @@ class TestTimes(object):
 
     try:
       with TestTimes.LockedFile(save_file, 'rb') as fd:
-        with gzip.GzipFile(fileobj=fd, mode='rb') as gzf:
-          times = cPickle.load(gzf)
-    except (EOFError, OSError, IOError, cPickle.UnpicklingError, zlib.error):
-      # File doesn't exist, isn't readable, is malformed---whatever.
-      # Just ignore it.
+        times = TestTimes.__read_test_times_file(fd)
+    except IOError:
+      # We couldn't obtain the lock.
       return
 
     # Discard saved times if the format isn't right.
@@ -437,21 +440,40 @@ class TestTimes(object):
     "Write all the times to file."
     try:
       with TestTimes.LockedFile(save_file, 'a+b') as fd:
-        fd.seek(0)
-        try:
-          with gzip.GzipFile(fileobj=fd, mode='rb') as gzf:
-            times = cPickle.load(gzf)
+        times = TestTimes.__read_test_times_file(fd)
 
-          times.update(self.__times)
-        except (EOFError, IOError, cPickle.UnpicklingError, zlib.error):
+        if times is None:
           times = self.__times
+        else:
+          times.update(self.__times)
 
-        fd.seek(0)
+        # We erase data from file while still holding a lock to it. This
+        # way reading old test times and appending new ones are atomic
+        # for external viewer.
         fd.truncate()
         with gzip.GzipFile(fileobj=fd, mode='wb') as gzf:
           cPickle.dump(times, gzf, cPickle.HIGHEST_PROTOCOL)
     except IOError:
       pass  # ignore errors---saving the times isn't that important
+
+  @staticmethod
+  def __read_test_times_file(fd):
+    # We seek to the beginning of file because if it was opened with 'a' mode
+    # then the file's position is at the end of file.
+    fd.seek(0)
+
+    try:
+      with gzip.GzipFile(fileobj=fd, mode='rb') as gzf:
+        times = cPickle.load(gzf)
+    except Exception:
+      # File doesn't exist, isn't readable, is malformed---whatever.
+      # Just ignore it.
+      return None
+    else:
+      return times
+    finally:
+      # Seek to the beginning of file again to simplify working with it later.
+      fd.seek(0)
 
 
 def find_tests(binaries, additional_args, options, times):
