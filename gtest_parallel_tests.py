@@ -18,7 +18,6 @@ import gtest_parallel
 import os.path
 import random
 import shutil
-import sys
 import tempfile
 import threading
 import time
@@ -373,6 +372,44 @@ class TestSerializeTestCases(unittest.TestCase):
                         max_number_of_repeats=1,
                         max_number_of_workers=16,
                         serialize_test_cases=False)
+
+
+class TestTestTimes(unittest.TestCase):
+  def test_race_in_test_times_load_save(self):
+    max_number_of_workers = 8
+    max_number_of_read_write_cycles = 64
+    test_times_file_name = 'test_times.pickle'
+
+    def start_worker(save_file):
+      def test_times_worker():
+        thread_id = threading.current_thread().ident
+        path_to_binary = 'path/to/binary' + hex(thread_id)
+
+        for cnt in range(max_number_of_read_write_cycles):
+          times = gtest_parallel.TestTimes(save_file)
+
+          threads_test_times = [
+            binary for (binary, _) in times._TestTimes__times.keys()
+            if binary.startswith(path_to_binary)]
+
+          self.assertEqual(cnt, len(threads_test_times))
+
+          times.record_test_time('{}-{}'.format(path_to_binary, cnt),
+                                 'TestFoo.testBar', 1000)
+
+          times.write_to_file(save_file)
+
+      t = threading.Thread(target=test_times_worker)
+      t.start()
+      return t
+
+    with guard_temp_dir() as temp_dir:
+      try:
+        workers = [start_worker(os.path.join(temp_dir, test_times_file_name))
+                   for _ in range(max_number_of_workers)]
+      finally:
+        for worker in workers:
+          worker.join()
 
 
 if __name__ == '__main__':

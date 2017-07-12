@@ -30,6 +30,12 @@ import threading
 import time
 import zlib
 
+if sys.platform == 'win32':
+  import msvcrt
+else:
+  import fcntl
+
+
 # An object that catches SIGINT sent to the Python process and notices
 # if processes passed to wait() die by SIGINT (we need to look for
 # both of those cases, because pressing Ctrl+C can result in either
@@ -358,6 +364,50 @@ class CollectTestResults(object):
 
 # Record of test runtimes. Has built-in locking.
 class TestTimes(object):
+  class LockedFile(object):
+    def __init__(self, filename, mode):
+      self._filename = filename
+      self._mode = mode
+      self._fo = None
+
+    def __enter__(self):
+      self._fo = open(self._filename, self._mode)
+
+      # Regardless of opening mode we always seek to the beginning of file.
+      # This simplifies code working with LockedFile and also ensures that
+      # we lock (and unlock below) always the same region in file on win32.
+      self._fo.seek(0)
+
+      try:
+        if sys.platform == 'win32':
+          # We are locking here fixed location in file to use it as
+          # an exclusive lock on entire file.
+          msvcrt.locking(self._fo.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+          fcntl.flock(self._fo.fileno(), fcntl.LOCK_EX)
+      except IOError:
+        self._fo.close()
+        raise
+
+      return self._fo
+
+    def __exit__(self, exc_type, exc_value, traceback):
+      # Flush any buffered data to disk. This is needed to prevent race
+      # condition which happens from the moment of releasing file lock
+      # till closing the file.
+      self._fo.flush()
+
+      try:
+        if sys.platform == 'win32':
+          self._fo.seek(0)
+          msvcrt.locking(self._fo.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+          fcntl.flock(self._fo.fileno(), fcntl.LOCK_UN)
+      finally:
+        self._fo.close()
+
+      return exc_value is None
+
   def __init__(self, save_file):
     "Create new object seeded with saved test times from the given file."
     self.__times = {}  # (test binary, test name) -> runtime in ms
@@ -367,11 +417,10 @@ class TestTimes(object):
     self.__lock = threading.Lock()
 
     try:
-      with gzip.GzipFile(save_file, "rb") as f:
-        times = cPickle.load(f)
-    except (EOFError, IOError, cPickle.UnpicklingError, zlib.error):
-      # File doesn't exist, isn't readable, is malformed---whatever.
-      # Just ignore it.
+      with TestTimes.LockedFile(save_file, 'rb') as fd:
+        times = TestTimes.__read_test_times_file(fd)
+    except IOError:
+      # We couldn't obtain the lock.
       return
 
     # Discard saved times if the format isn't right.
@@ -398,11 +447,35 @@ class TestTimes(object):
   def write_to_file(self, save_file):
     "Write all the times to file."
     try:
-      with open(save_file, "wb") as f:
-        with gzip.GzipFile("", "wb", 9, f) as gzf:
-          cPickle.dump(self.__times, gzf, cPickle.HIGHEST_PROTOCOL)
+      with TestTimes.LockedFile(save_file, 'a+b') as fd:
+        times = TestTimes.__read_test_times_file(fd)
+
+        if times is None:
+          times = self.__times
+        else:
+          times.update(self.__times)
+
+        # We erase data from file while still holding a lock to it. This
+        # way reading old test times and appending new ones are atomic
+        # for external viewer.
+        fd.seek(0)
+        fd.truncate()
+        with gzip.GzipFile(fileobj=fd, mode='wb') as gzf:
+          cPickle.dump(times, gzf, cPickle.HIGHEST_PROTOCOL)
     except IOError:
       pass  # ignore errors---saving the times isn't that important
+
+  @staticmethod
+  def __read_test_times_file(fd):
+    try:
+      with gzip.GzipFile(fileobj=fd, mode='rb') as gzf:
+        times = cPickle.load(gzf)
+    except Exception:
+      # File doesn't exist, isn't readable, is malformed---whatever.
+      # Just ignore it.
+      return None
+    else:
+      return times
 
 
 def find_tests(binaries, additional_args, options, times):
