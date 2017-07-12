@@ -373,18 +373,16 @@ class TestTimes(object):
     def __enter__(self):
       self._fo = open(self._filename, self._mode)
 
+      # Regardless of opening mode we always seek to the beginning of file.
+      # This simplifies code working with LockedFile and also ensures that
+      # we lock (and unlock below) always the same region in file on win32.
+      self._fo.seek(0)
+
       try:
         if sys.platform == 'win32':
-          # We make sure that we lock (and unlock below) always
-          # the same region in file.
-          position = self._fo.tell()
-          self._fo.seek(0)
-
           # We are locking here fixed location in file to use it as
           # an exclusive lock on entire file.
           msvcrt.locking(self._fo.fileno(), msvcrt.LK_LOCK, 1)
-
-          self._fo.seek(position)
         else:
           fcntl.flock(self._fo.fileno(), fcntl.LOCK_EX)
       except IOError:
@@ -401,12 +399,8 @@ class TestTimes(object):
 
       try:
         if sys.platform == 'win32':
-          position = self._fo.tell()
           self._fo.seek(0)
-
           msvcrt.locking(self._fo.fileno(), msvcrt.LK_UNLCK, 1)
-
-          self._fo.seek(position)
         else:
           fcntl.flock(self._fo.fileno(), fcntl.LOCK_UN)
       finally:
@@ -464,6 +458,7 @@ class TestTimes(object):
         # We erase data from file while still holding a lock to it. This
         # way reading old test times and appending new ones are atomic
         # for external viewer.
+        fd.seek(0)
         fd.truncate()
         with gzip.GzipFile(fileobj=fd, mode='wb') as gzf:
           cPickle.dump(times, gzf, cPickle.HIGHEST_PROTOCOL)
@@ -472,10 +467,6 @@ class TestTimes(object):
 
   @staticmethod
   def __read_test_times_file(fd):
-    # We seek to the beginning of file because if it was opened with 'a' mode
-    # then the file's position is at the end of file.
-    fd.seek(0)
-
     try:
       with gzip.GzipFile(fileobj=fd, mode='rb') as gzf:
         times = cPickle.load(gzf)
@@ -485,9 +476,6 @@ class TestTimes(object):
       return None
     else:
       return times
-    finally:
-      # Seek to the beginning of file again to simplify working with it later.
-      fd.seek(0)
 
 
 def find_tests(binaries, additional_args, options, times):
