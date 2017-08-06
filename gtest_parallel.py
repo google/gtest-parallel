@@ -599,7 +599,7 @@ def main():
       usage = 'usage: %prog [options] binary [binary ...] -- [additional args]')
 
   parser.add_option('-d', '--output_dir', type='string',
-                    default=os.path.join(tempfile.gettempdir(), "gtest-parallel"),
+                    default=tempfile.mkdtemp('gtest-parallel')),
                     help='output directory for test logs')
   parser.add_option('-r', '--repeat', type='int', default=1,
                     help='Number of times to execute all the tests.')
