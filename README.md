@@ -29,7 +29,7 @@ _For a full list of options, see `--help`._
 
 This shards all enabled tests across a number of workers, defaulting to the
 number of cores in the system. If your system uses Python 2, but you have no
-python2 binary, run `python -m gtest-parallel` instead of `gtest-parallel`.
+python2 binary, run `python -m gtest_parallel` instead of `gtest-parallel`.
 
 To run only a select set of tests, run:
 
