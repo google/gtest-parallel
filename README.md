@@ -12,19 +12,28 @@ workers in separate processes. This works fine so long as the tests are self
 contained and do not share resources (reading data is fine, writing to the same
 log file is probably not).
 
+## Install
+You can install gtest-parallel as a user local python package using the following
+command:
+```bash
+python2 setup.py install --user
+```
+Note: make sure `site.USER_BASE/bin` is added to your PATH environment variable.
+The unix default for `site.USER_BASE` is typically `/home/<user>/.local`.
+
 ## Basic Usage
 
 _For a full list of options, see `--help`._
 
-    $ ./gtest-parallel path/to/binary...
+    $ gtest-parallel path/to/binary...
 
 This shards all enabled tests across a number of workers, defaulting to the
 number of cores in the system. If your system uses Python 2, but you have no
-python2 binary, run `python gtest-parallel` instead of `./gtest-parallel`.
+python2 binary, run `python -m gtest_parallel` instead of `gtest-parallel`.
 
 To run only a select set of tests, run:
 
-    $ ./gtest-parallel path/to/binary... --gtest_filter=Foo.*:Bar.*
+    $ gtest-parallel path/to/binary... --gtest_filter=Foo.*:Bar.*
 
 This filter takes the same parameters as Google Test, so -Foo.\* can be used for
 test exclusion as well. This is especially useful for slow tests (that you're
@@ -42,7 +51,7 @@ loads (especially tests that use realtime clocks), so raising the number of
 `--workers=` well above the number of available core can often cause contention
 and be fruitful for detecting flaky tests as well.
 
-    $ ./gtest-parallel out/{binary1,binary2,binary3} --repeat=1000 --workers=128
+    $ gtest-parallel out/{binary1,binary2,binary3} --repeat=1000 --workers=128
 
 The above command repeats all tests inside `binary1`, `binary2` and `binary3`
 located in `out/`. The tests are run `1000` times each on `128` workers (this is
