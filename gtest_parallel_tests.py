@@ -18,6 +18,7 @@ import gtest_parallel
 import os.path
 import random
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -411,6 +412,39 @@ class TestTestTimes(unittest.TestCase):
         for worker in workers:
           worker.join()
 
+
+class TestFilterFormat(unittest.TestCase):
+  def test_log_file_names(self):
+    def root():
+      return 'C:\\' if sys.platform == 'win32' else '/'
+
+    self.assertEqual(
+      'bin-Test_case-100.log',
+      gtest_parallel.Task._logname('', 'bin', 'Test.case', 100))
+
+    self.assertEqual(
+      os.path.join('..', 'a', 'b', 'bin-Test_case_2-1.log'),
+      gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
+                                   os.path.join('..', 'bin'),
+                                   'Test.case/2', 1))
+
+    self.assertEqual(
+      os.path.join('..', 'a', 'b', 'bin-Test_case_2-5.log'),
+      gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
+                                   os.path.join(root(), 'c', 'd', 'bin'),
+                                   'Test.case/2', 5))
+
+    self.assertEqual(
+      os.path.join(root(), 'a', 'b', 'bin-Instantiation_Test_case_2-3.log'),
+      gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
+                                   os.path.join('..', 'c', 'bin'),
+                                   'Instantiation/Test.case/2', 3))
+
+    self.assertEqual(
+      os.path.join(root(), 'a', 'b', 'bin-Test_case-1.log'),
+      gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
+                                   os.path.join(root(), 'c', 'd', 'bin'),
+                                   'Test.case', 1))
 
 if __name__ == '__main__':
   unittest.main()
