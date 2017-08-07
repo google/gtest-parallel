@@ -18,6 +18,7 @@ import gtest_parallel
 import os.path
 import random
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -410,6 +411,21 @@ class TestTestTimes(unittest.TestCase):
       finally:
         for worker in workers:
           worker.join()
+
+
+class TestFilterFormat(unittest.TestCase):
+  @unittest.skipUnless(sys.platform.startswith("win"), "requires Windows")
+  def test_long_file_names_in_move_to(self):
+    class Task(object):
+      def __init__(self, length, dest):
+        self.log_file = os.path.join(dest, ('a' * length) + '.log')
+        with open(self.log_file, 'wb'):
+          pass
+
+    with guard_temp_dir() as temp_dir:
+      ff = gtest_parallel.FilterFormat(temp_dir)
+      tasks = [Task(l, temp_dir) for l in range(1, 255 - len(temp_dir))]
+      ff.move_to('passed', tasks)
 
 
 if __name__ == '__main__':
