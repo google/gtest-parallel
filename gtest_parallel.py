@@ -167,9 +167,9 @@ class Task(object):
     self.test_id = (test_binary, test_name)
     self.task_id = (test_binary, test_name, self.execution_number)
 
-    log_name = '%s-%s-%s.log' % (self.__normalize(test_binary),
-                                 self.__normalize(test_name),
-                                 self.execution_number)
+    log_name = '%s-%s-%s.log' % (
+      Task._normalize(os.path.basename(test_binary)),
+      Task._normalize(test_name), self.execution_number)
 
     self.log_file = os.path.join(output_dir, log_name)
 
@@ -180,7 +180,8 @@ class Task(object):
       return False
     return self.last_execution_time > other.last_execution_time
 
-  def __normalize(self, string):
+  @staticmethod
+  def _normalize(string):
     return re.sub('[^A-Za-z0-9]', '_', string)
 
   def run(self):

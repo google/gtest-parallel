@@ -414,18 +414,42 @@ class TestTestTimes(unittest.TestCase):
 
 
 class TestFilterFormat(unittest.TestCase):
-  @unittest.skipUnless(sys.platform.startswith("win"), "requires Windows")
-  def test_long_file_names_in_move_to(self):
-    class Task(object):
-      def __init__(self, length, dest):
-        self.log_file = os.path.join(dest, ('a' * length) + '.log')
-        with open(self.log_file, 'wb'):
-          pass
+  def test_on_windows_long_file_names_in_move_to(self):
+    destination_subdir = 'interrupted'
+    max_path = 260
+
+    def expected_log_path(log_dir, log_file):
+      return os.path.join(log_dir, destination_subdir, log_file)
+
+    def deeply_nested_binary(base_dir, log_dir):
+      padding = len(expected_log_path(log_dir,
+                                      'TestBinary-TestSuite.testCase-1.log'))
+      while len(gtest_parallel.Task._normalize(base_dir)) + padding < max_path:
+        base_dir = os.path.join(base_dir, 'subdir')
+
+      return os.path.join(base_dir, 'TestBinary')
 
     with guard_temp_dir() as temp_dir:
-      ff = gtest_parallel.FilterFormat(temp_dir)
-      tasks = [Task(l, temp_dir) for l in range(1, 255 - len(temp_dir))]
-      ff.move_to('passed', tasks)
+      test_name = 'TestSuite.testCase'
+      test_command = None
+      execution_number = 1
+      last_execution_time = None
+      output_dir = os.path.join(temp_dir, 'output')
+      test_binary = deeply_nested_binary(temp_dir, output_dir)
+      task = gtest_parallel.Task(test_binary, test_name, test_command,
+                                 execution_number, last_execution_time,
+                                 output_dir)
+
+      os.makedirs(os.path.dirname(task.log_file))
+      with open(task.log_file, 'wb'):
+        pass
+
+      ff = gtest_parallel.FilterFormat(output_dir)
+      ff.move_to(destination_subdir, [task])
+
+      self.assertTrue(
+        os.path.isfile(expected_log_path(os.path.dirname(task.log_file),
+                                         os.path.basename(task.log_file))))
 
 
 if __name__ == '__main__':
