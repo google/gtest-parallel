@@ -414,6 +414,28 @@ class TestTestTimes(unittest.TestCase):
 
 
 class TestFilterFormat(unittest.TestCase):
+  def test_log_file_names(self):
+    self.assertEqual(
+      'bin-Test_case-100.log',
+      gtest_parallel.Task._logname('', 'bin', 'Test.case', 100))
+
+    self.assertEqual(
+      '../a/b/bin-Test_case_2-1.log',
+      gtest_parallel.Task._logname('../a/b', '../bin', 'Test.case/2', 1))
+
+    self.assertEqual(
+      '../a/b/bin-Test_case_2-5.log',
+      gtest_parallel.Task._logname('../a/b', '/c/d/bin', 'Test.case/2', 5))
+
+    self.assertEqual(
+      '/a/b/bin-Instantiation_Test_case_2-3.log',
+      gtest_parallel.Task._logname('/a/b', '../c/bin',
+                                   'Instantiation/Test.case/2', 3))
+
+    self.assertEqual(
+      '/a/b/bin-Test_case-1.log',
+      gtest_parallel.Task._logname('/a/b', '/c/d/bin', 'Test.case', 1))
+
   def test_on_windows_long_file_names_in_move_to(self):
     destination_subdir = 'interrupted'
     max_path = 260
