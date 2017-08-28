@@ -18,6 +18,7 @@ import gtest_parallel
 import os.path
 import random
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -410,6 +411,77 @@ class TestTestTimes(unittest.TestCase):
       finally:
         for worker in workers:
           worker.join()
+
+
+class TestFilterFormat(unittest.TestCase):
+  def test_log_file_names(self):
+    def root():
+      return 'c:/' if sys.platform == 'win32' else '/'
+
+    self.assertEqual(
+      'bin-Test_case-100.log',
+      gtest_parallel.Task._logname('', 'bin', 'Test.case', 100))
+
+    self.assertEqual(
+      os.path.join('..', 'a', 'b', 'bin-Test_case_2-1.log'),
+      gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
+                                   os.path.join('..', 'bin'),
+                                   'Test.case/2', 1))
+
+    self.assertEqual(
+      os.path.join('..', 'a', 'b', 'bin-Test_case_2-5.log'),
+      gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
+                                   os.path.join(root(), 'c', 'd', 'bin'),
+                                   'Test.case/2', 5))
+
+    self.assertEqual(
+      os.path.join(root(), 'a', 'b', 'bin-Instantiation_Test_case_2-3.log'),
+      gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
+                                   os.path.join('..', 'c', 'bin'),
+                                   'Instantiation/Test.case/2', 3))
+
+    self.assertEqual(
+      os.path.join(root(), 'a', 'b', 'bin-Test_case-1.log'),
+      gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
+                                   os.path.join(root(), 'c', 'd', 'bin'),
+                                   'Test.case', 1))
+
+  def test_on_windows_long_file_names_in_move_to(self):
+    destination_subdir = 'interrupted'
+    max_path = 260
+
+    def expected_log_path(log_dir, log_file):
+      return os.path.join(log_dir, destination_subdir, log_file)
+
+    def deeply_nested_binary(base_dir, log_dir):
+      padding = len(expected_log_path(log_dir,
+                                      'TestBinary-TestSuite.testCase-1.log'))
+      while len(gtest_parallel.Task._normalize(base_dir)) + padding < max_path:
+        base_dir = os.path.join(base_dir, 'subdir')
+
+      return os.path.join(base_dir, 'TestBinary')
+
+    with guard_temp_dir() as temp_dir:
+      test_name = 'TestSuite.testCase'
+      test_command = None
+      execution_number = 1
+      last_execution_time = None
+      output_dir = os.path.join(temp_dir, 'output')
+      test_binary = deeply_nested_binary(temp_dir, output_dir)
+      task = gtest_parallel.Task(test_binary, test_name, test_command,
+                                 execution_number, last_execution_time,
+                                 output_dir)
+
+      os.makedirs(os.path.dirname(task.log_file))
+      with open(task.log_file, 'wb'):
+        pass
+
+      ff = gtest_parallel.FilterFormat(output_dir)
+      ff.move_to(destination_subdir, [task])
+
+      self.assertTrue(
+        os.path.isfile(expected_log_path(os.path.dirname(task.log_file),
+                                         os.path.basename(task.log_file))))
 
 
 if __name__ == '__main__':

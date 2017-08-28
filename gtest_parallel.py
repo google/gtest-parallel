@@ -167,11 +167,8 @@ class Task(object):
     self.test_id = (test_binary, test_name)
     self.task_id = (test_binary, test_name, self.execution_number)
 
-    log_name = '%s-%s-%s.log' % (self.__normalize(test_binary),
-                                 self.__normalize(test_name),
-                                 self.execution_number)
-
-    self.log_file = os.path.join(output_dir, log_name)
+    self.log_file = Task._logname(self.output_dir, self.test_binary,
+                                  test_name, self.execution_number)
 
   def __lt__(self, other):
     if self.last_execution_time is None:
@@ -180,8 +177,16 @@ class Task(object):
       return False
     return self.last_execution_time > other.last_execution_time
 
-  def __normalize(self, string):
+  @staticmethod
+  def _normalize(string):
     return re.sub('[^A-Za-z0-9]', '_', string)
+
+  @staticmethod
+  def _logname(output_dir, test_binary, test_name, execution_number):
+    log_name = '%s-%s-%d.log' % (Task._normalize(os.path.basename(test_binary)),
+                                 Task._normalize(test_name), execution_number)
+
+    return os.path.join(output_dir, log_name)
 
   def run(self):
     begin = time.time()
@@ -287,7 +292,6 @@ class FilterFormat(object):
     os.makedirs(destination_dir)
     for task in tasks:
         shutil.move(task.log_file, destination_dir)
-
 
   def print_tests(self, message, tasks, print_try_number):
     self.out.permanent_line("%s (%s/%s):" %
