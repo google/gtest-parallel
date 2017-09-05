@@ -603,8 +603,11 @@ def main():
       usage = 'usage: %prog [options] binary [binary ...] -- [additional args]')
 
   parser.add_option('-d', '--output_dir', type='string',
-                    default=os.path.join(tempfile.gettempdir(), "gtest-parallel"),
-                    help='output directory for test logs')
+                    default=tempfile.gettempdir(),
+                    help='Output directory for test logs. Logs will be '
+                         'available under gtest-parallel-logs/, so '
+                         '--output_dir=/tmp will results in all logs being '
+                         'available under /tmp/gtest-parallel-logs/.')
   parser.add_option('-r', '--repeat', type='int', default=1,
                     help='Number of times to execute all the tests.')
   parser.add_option('--retry_failed', type='int', default=0,
@@ -640,6 +643,11 @@ def main():
                                         'case in parallel.')
 
   (options, binaries) = parser.parse_args()
+  # Append gtest-parallel-logs to log output, this is to avoid deleting user
+  # data if an user passes a directory where files are already present. If a
+  # user specifies --output_dir=Docs/, we'll create Docs/gtest-parallel-logs
+  # and clean that directory out on startup, instead of nuking Docs/.
+  options.output_dir = os.path.join(options.output_dir, 'gtest-parallel-logs')
 
   if binaries == []:
     parser.print_usage()
