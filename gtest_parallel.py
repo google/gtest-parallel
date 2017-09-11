@@ -171,14 +171,13 @@ class Task(object):
 
   def __sorting_key(self):
     # Unseen or failing tests (both missing execution time) take precedence over
-    # execution time.
+    # execution time. Tests are greater (seen as slower) when missing times so
+    # that they are executed first.
     return (1 if self.last_execution_time is None else 0,
             self.last_execution_time)
 
   def __cmp__(self, other):
-    # Reverse sorting order, we want larger items (longer runtimes or
-    # unseen/failing tests) first to run longer tests first.
-    return -cmp(self.__sorting_key(), other.__sorting_key())
+    return cmp(self.__sorting_key(), other.__sorting_key())
 
   @staticmethod
   def _normalize(string):
@@ -535,7 +534,9 @@ def find_tests(binaries, additional_args, options, times):
 
       test_count += 1
 
-  return sorted(tasks)
+  # Sort the tasks to run the slowest tests first, so that faster ones can be
+  # finished in parallel.
+  return sorted(tasks, reverse=True)
 
 
 def execute_tasks(tasks, pool_size, task_manager,
