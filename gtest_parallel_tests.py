@@ -24,100 +24,15 @@ import threading
 import time
 import unittest
 
-
-class LoggerMock(object):
-  def __init__(self):
-    self.runtimes = collections.defaultdict(list)
-    self.exit_codes = collections.defaultdict(list)
-    self.last_execution_times = collections.defaultdict(list)
-    self.execution_numbers = collections.defaultdict(list)
-
-  def log_exit(self, task):
-    self.runtimes[task.test_id].append(task.runtime_ms)
-    self.exit_codes[task.test_id].append(task.exit_code)
-    self.last_execution_times[task.test_id].append(task.last_execution_time)
-    self.execution_numbers[task.test_id].append(task.execution_number)
-
-  def assertRecorded(self, test_lib, test_id, expected, retries):
-    test_lib.assertIn(test_id, self.runtimes)
-    test_lib.assertListEqual(expected['runtime_ms'][:retries],
-                             self.runtimes[test_id])
-    test_lib.assertListEqual(expected['exit_code'][:retries],
-                             self.exit_codes[test_id])
-    test_lib.assertListEqual(expected['last_execution_time'][:retries],
-                             self.last_execution_times[test_id])
-    test_lib.assertListEqual(expected['execution_number'][:retries],
-                                  self.execution_numbers[test_id])
-
-
-class TimesMock(object):
-  def __init__(self):
-    self.last_execution_times = collections.defaultdict(list)
-
-  def record_test_time(self, test_binary, test_name, last_execution_time):
-    test_id = (test_binary, test_name)
-    self.last_execution_times[test_id].append(last_execution_time)
-
-  def assertRecorded(self, test_lib, test_id, expected, retries):
-    test_lib.assertIn(test_id, self.last_execution_times)
-    test_lib.assertListEqual(expected['last_execution_time'][:retries],
-                             self.last_execution_times[test_id])
-
-
-class TestResultsMock(object):
-  def __init__(self):
-    self.results = []
-
-  def log(self, test_name, runtime_ms, actual_result):
-    self.results.append((test_name, runtime_ms, actual_result))
-
-  def assertRecorded(self, test_lib, test_id, expected, retries):
-    test_results = [
-        (test_id[1], runtime_ms, 'PASS' if exit_code == 0 else 'FAIL')
-        for runtime_ms, exit_code in zip(expected['runtime_ms'][:retries],
-                                         expected['exit_code'][:retries])
-    ]
-    for test_result in test_results:
-      test_lib.assertIn(test_result, self.results)
-
-
-class TaskMockFactory(object):
-  def __init__(self, test_data):
-    self.data = test_data
-    self.passed = []
-    self.failed = []
-
-  def get_task(self, test_id, execution_number=0):
-    task = TaskMock(test_id, execution_number, self.data[test_id])
-    if task.exit_code == 0:
-      self.passed.append(task)
-    else:
-      self.failed.append(task)
-    return task
-
-  def __call__(self, test_binary, test_name, test_command, execution_number,
-               last_execution_time, output_dir):
-    return self.get_task((test_binary, test_name), execution_number)
-
-
-class TaskMock(object):
-  def __init__(self, test_id, execution_number, test_data):
-    self.test_id = test_id
-    self.execution_number = execution_number
-
-    self.runtime_ms = test_data['runtime_ms'][execution_number]
-    self.exit_code = test_data['exit_code'][execution_number]
-    self.last_execution_time = (
-        test_data['last_execution_time'][execution_number])
-    self.test_command = None
-    self.output_dir = None
-
-    self.test_binary = test_id[0]
-    self.test_name = test_id[1]
-    self.task_id = (test_id[0], test_id[1], execution_number)
-
-  def run(self):
-    pass
+from gtest_parallel_mocks import LoggerMock
+from gtest_parallel_mocks import TestTimesMock
+from gtest_parallel_mocks import TestResultsMock
+from gtest_parallel_mocks import TaskManagerMock
+from gtest_parallel_mocks import TaskMockFactory
+from gtest_parallel_mocks import TaskMock
+from gtest_parallel_mocks import guard_temp_dir
+from gtest_parallel_mocks import guard_temp_subdir
+from gtest_parallel_mocks import guard_patch_module
 
 
 class TestTaskManager(unittest.TestCase):
@@ -150,9 +65,9 @@ class TestTaskManager(unittest.TestCase):
   def execute_tasks(self, tasks, retries, expected_exit_code):
     repeat = 1
 
-    times = TimesMock()
-    logger = LoggerMock()
-    test_results = TestResultsMock()
+    times = TestTimesMock(self)
+    logger = LoggerMock(self)
+    test_results = TestResultsMock(self)
 
     task_mock_factory = TaskMockFactory(dict(tasks))
     task_manager = gtest_parallel.TaskManager(
@@ -163,9 +78,9 @@ class TestTaskManager(unittest.TestCase):
       task_manager.run_task(task)
       expected['execution_number'] = range(len(expected['exit_code']))
 
-      logger.assertRecorded(self, test_id, expected, retries + 1)
-      times.assertRecorded(self, test_id, expected, retries + 1)
-      test_results.assertRecorded(self,test_id, expected, retries + 1)
+      logger.assertRecorded(test_id, expected, retries + 1)
+      times.assertRecorded(test_id, expected, retries + 1)
+      test_results.assertRecorded(test_id, expected, retries + 1)
 
     self.assertEqual(len(task_manager.started), 0)
     self.assertListEqual(
@@ -219,43 +134,6 @@ class TestTaskManager(unittest.TestCase):
                               self.fails_twice_then_succeeds],
                        retries=2, expected_exit_code=0)
 
-@contextlib.contextmanager
-def guard_temp_dir():
-  try:
-    temp_dir = tempfile.mkdtemp()
-    yield temp_dir
-  finally:
-    shutil.rmtree(temp_dir)
-
-
-@contextlib.contextmanager
-def guard_temp_subdir(temp_dir, *path):
-  assert path, 'Path should not be empty'
-
-  try:
-    temp_subdir = os.path.join(temp_dir, *path)
-    os.makedirs(temp_subdir)
-    yield temp_subdir
-  finally:
-    shutil.rmtree(os.path.join(temp_dir, path[0]))
-
-
-@contextlib.contextmanager
-def guard_patch_module(import_name, new_val):
-  def patch(module, names, val):
-    if len(names) == 1:
-      old = getattr(module, names[0])
-      setattr(module, names[0], val)
-      return old
-    else:
-      return patch(getattr(module, names[0]), names[1:], val)
-
-  try:
-    old_val = patch(gtest_parallel, import_name.split('.'), new_val)
-    yield old_val
-  finally:
-    patch(gtest_parallel, import_name.split('.'), old_val)
-
 
 class TestSaveFilePath(unittest.TestCase):
   class StreamMock(object):
@@ -304,29 +182,6 @@ class TestSaveFilePath(unittest.TestCase):
 
 
 class TestSerializeTestCases(unittest.TestCase):
-  class TaskManagerMock(object):
-    def __init__(self):
-      self.running_groups = []
-      self.check_lock = threading.Lock()
-
-      self.had_running_parallel_groups = False
-      self.total_tasks_run = 0
-
-    def run_task(self, task):
-      test_group = task.test_name.split('.')[0]
-
-      with self.check_lock:
-        self.total_tasks_run += 1
-        if test_group in self.running_groups:
-          self.had_running_parallel_groups = True
-        self.running_groups.append(test_group)
-
-      # Delay as if real test were run.
-      time.sleep(0.001)
-
-      with self.check_lock:
-        self.running_groups.remove(test_group)
-
   def _execute_tasks(self, max_number_of_test_cases,
                      max_number_of_tests_per_test_case,
                      max_number_of_repeats, max_number_of_workers,
@@ -344,7 +199,7 @@ class TestSerializeTestCases(unittest.TestCase):
 
     expected_tasks_number = len(tasks)
 
-    task_manager = TestSerializeTestCases.TaskManagerMock()
+    task_manager = TaskManagerMock()
 
     gtest_parallel.execute_tasks(tasks, max_number_of_workers,
                                  task_manager, None, serialize_test_cases)
@@ -445,6 +300,7 @@ class TestFilterFormat(unittest.TestCase):
       gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
                                    os.path.join(root(), 'c', 'd', 'bin'),
                                    'Test.case', 1))
+
 
 if __name__ == '__main__':
   unittest.main()
