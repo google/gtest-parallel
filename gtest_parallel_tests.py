@@ -25,6 +25,7 @@ import time
 import unittest
 
 from gtest_parallel_mocks import LoggerMock
+from gtest_parallel_mocks import PopenMock
 from gtest_parallel_mocks import TestTimesMock
 from gtest_parallel_mocks import TestResultsMock
 from gtest_parallel_mocks import TaskManagerMock
@@ -333,6 +334,141 @@ class TestFilterFormat(unittest.TestCase):
       gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
                                    os.path.join(root(), 'c', 'd', 'bin'),
                                    'Test.case', 1))
+
+
+class TestFindTests(unittest.TestCase):
+  ONE_DISABLED_ONE_ENABLED_TEST = {
+      "fake_unittests": {
+          "FakeTest": {
+              "Test1": None,
+              "DISABLED_Test2": None,
+          }
+      }
+  }
+  ONE_FAILED_ONE_PASSED_TEST = {
+      "fake_unittests": {
+          "FakeTest": {
+              # Failed (and new) tests have no recorded runtime.
+              "FailedTest": None,
+              "Test": 1,
+          }
+      }
+  }
+  ONE_TEST = {
+      "fake_unittests": {
+          "FakeTest": {
+              "TestSomething": None,
+          }
+      }
+  }
+  MULTIPLE_BINARIES_MULTIPLE_TESTS_ONE_FAILURE = {
+      "fake_unittests": {
+          "FakeTest": {
+              "TestSomething": None,
+              "TestSomethingElse": 2,
+          },
+          "SomeOtherTest": {
+              "YetAnotherTest": 3,
+          },
+      },
+      "fake_tests": {
+          "Foo": {
+              "Bar": 4,
+              "Baz": 4,
+          }
+      }
+  }
+
+  def _process_options(self, options):
+    parser = gtest_parallel.default_options_parser()
+    options, binaries = parser.parse_args(options)
+    self.assertEqual(len(binaries), 0)
+    return options
+
+  def _call_find_tests(self, test_data, options=None):
+    popen_mock = PopenMock(test_data)
+    options = self._process_options(options or [])
+    with guard_patch_module('subprocess.Popen', popen_mock):
+      tasks = gtest_parallel.find_tests(
+        test_data.keys(), [], options, TestTimesMock(self, test_data))
+    return tasks, popen_mock
+
+  def test_tasks_are_sorted(self):
+    tasks, _ = self._call_find_tests(
+        self.MULTIPLE_BINARIES_MULTIPLE_TESTS_ONE_FAILURE)
+    self.assertEqual(tasks, sorted(tasks))
+
+  def test_does_not_run_disabled_tests_by_default(self):
+    tasks, popen_mock = self._call_find_tests(
+        self.ONE_DISABLED_ONE_ENABLED_TEST)
+    self.assertEqual(len(tasks), 1)
+    self.assertFalse("DISABLED_" in tasks[0].test_name)
+    self.assertNotIn("--gtest_also_run_disabled_tests",
+                     popen_mock.last_invocation)
+
+  def test_runs_disabled_tests_when_asked(self):
+    tasks, popen_mock = self._call_find_tests(
+        self.ONE_DISABLED_ONE_ENABLED_TEST,
+        ['--gtest_also_run_disabled_tests'])
+    self.assertEqual(len(tasks), 2)
+    self.assertEqual(sorted([task.test_name for task in tasks]),
+                     ["FakeTest.DISABLED_Test2", "FakeTest.Test1"])
+    self.assertIn("--gtest_also_run_disabled_tests",
+                  popen_mock.last_invocation)
+
+  def test_runs_failed_tests_by_default(self):
+    tasks, _ = self._call_find_tests(self.ONE_FAILED_ONE_PASSED_TEST)
+    self.assertEqual(len(tasks), 2)
+    self.assertEqual(sorted([task.test_name for task in tasks]),
+                     ["FakeTest.FailedTest", "FakeTest.Test"])
+    self.assertEqual(sorted([task.last_execution_time for task in tasks]),
+                     [None, 1])
+
+  def test_runs_only_failed_tests_when_asked(self):
+    tasks, _ = self._call_find_tests(
+        self.ONE_FAILED_ONE_PASSED_TEST, ['--failed'])
+    self.assertEqual(len(tasks), 1)
+    self.assertEqual(tasks[0].test_binary, "fake_unittests")
+    self.assertEqual(tasks[0].test_name, "FakeTest.FailedTest")
+    self.assertIsNone(tasks[0].last_execution_time)
+
+  def test_does_not_apply_gtest_filter_by_default(self):
+    _, popen_mock = self._call_find_tests(self.ONE_TEST)
+    self.assertFalse(any(
+        arg.startswith('--gtest_filter=SomeFilter')
+        for arg in popen_mock.last_invocation
+    ))
+  def test_applies_gtest_filter(self):
+    _, popen_mock = self._call_find_tests(
+        self.ONE_TEST, ['--gtest_filter=SomeFilter'])
+    self.assertIn('--gtest_filter=SomeFilter', popen_mock.last_invocation)
+
+  def test_applies_gtest_color_by_default(self):
+    tasks, _ = self._call_find_tests(self.ONE_TEST)
+    self.assertEqual(len(tasks), 1)
+    self.assertIn('--gtest_color=yes', tasks[0].test_command)
+
+  def test_applies_gtest_color(self):
+    tasks, _ = self._call_find_tests(self.ONE_TEST, ['--gtest_color=Lemur'])
+    self.assertEqual(len(tasks), 1)
+    self.assertIn('--gtest_color=Lemur', tasks[0].test_command)
+
+  def test_repeats_tasks_once_by_default(self):
+    tasks, _ = self._call_find_tests(self.ONE_TEST)
+    self.assertEqual(len(tasks), 1)
+
+  def test_repeats_tasks_multiple_times(self):
+    tasks, _ = self._call_find_tests(self.ONE_TEST, ['--repeat=3'])
+    self.assertEqual(len(tasks), 3)
+    # Test all tasks have the same test_name, test_binary and test_command
+    all_tasks_set = set(
+        (task.test_name, task.test_binary, tuple(task.test_command))
+        for task in tasks
+    )
+    self.assertEqual(len(all_tasks_set), 1)
+    # Test tasks have consecutive execution_numbers starting from 1
+    self.assertEqual(sorted(task.execution_number for task in tasks),
+                     [1, 2, 3])
 
 
 if __name__ == '__main__':

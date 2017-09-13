@@ -588,16 +588,7 @@ def execute_tasks(tasks, pool_size, task_manager,
       timeout.cancel()
 
 
-def main():
-  # Remove additional arguments (anything after --).
-  additional_args = []
-
-  for i in range(len(sys.argv)):
-    if sys.argv[i] == '--':
-      additional_args = sys.argv[i+1:]
-      sys.argv = sys.argv[:i]
-      break
-
+def default_options_parser():
   parser = optparse.OptionParser(
       usage = 'usage: %prog [options] binary [binary ...] -- [additional args]')
 
@@ -640,7 +631,20 @@ def main():
   parser.add_option('--serialize_test_cases', action='store_true',
                     default=False, help='Do not run tests from the same test '
                                         'case in parallel.')
+  return parser
 
+
+def main():
+  # Remove additional arguments (anything after --).
+  additional_args = []
+
+  for i in range(len(sys.argv)):
+    if sys.argv[i] == '--':
+      additional_args = sys.argv[i+1:]
+      sys.argv = sys.argv[:i]
+      break
+
+  parser = default_options_parser()
   (options, binaries) = parser.parse_args()
   # Append gtest-parallel-logs to log output, this is to avoid deleting user
   # data if an user passes a directory where files are already present. If a
