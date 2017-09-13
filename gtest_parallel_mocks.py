@@ -48,13 +48,19 @@ class LoggerMock(object):
 
 
 class TestTimesMock(object):
-  def __init__(self, test_lib):
+  def __init__(self, test_lib, test_data=None):
     self.test_lib = test_lib
+    self.test_data = test_data or {}
     self.last_execution_times = collections.defaultdict(list)
 
   def record_test_time(self, test_binary, test_name, last_execution_time):
     test_id = (test_binary, test_name)
     self.last_execution_times[test_id].append(last_execution_time)
+
+  def get_test_time(self, test_binary, test_name):
+    test_group, test = test_name.split('.')
+    return self.test_data.get(
+        test_binary, {}).get(test_group, {}).get(test, None)
 
   def assertRecorded(self, test_id, expected, retries):
     self.test_lib.assertIn(test_id, self.last_execution_times)
@@ -141,3 +147,27 @@ class TaskMock(object):
 
   def run(self):
     pass
+
+
+class PopenMock(object):
+  class _SubprocessMock(object):
+    def __init__(self, stdout=""):
+      self.stdout = stdout
+
+    def communicate(self):
+      return [self.stdout]
+
+  def __init__(self, test_data=None):
+    self._test_data = test_data
+    self.last_invocation = None
+
+  def __call__(self, command, stdout=None):
+    self.last_invocation = command
+    binary = command[0]
+    test_list = []
+    tests_for_binary = sorted(self._test_data.get(binary, {}).iteritems())
+    for test_group, tests in tests_for_binary:
+      test_list.append(test_group + ".")
+      for test in sorted(tests):
+        test_list.append("  " + test)
+    return self._SubprocessMock('\n'.join(test_list))
