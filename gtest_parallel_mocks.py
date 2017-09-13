@@ -1,4 +1,3 @@
-#!/usr/bin/env python2
 # Copyright 2017 Google Inc. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -142,43 +141,3 @@ class TaskMock(object):
 
   def run(self):
     pass
-
-
-@contextlib.contextmanager
-def guard_temp_dir():
-  try:
-    temp_dir = tempfile.mkdtemp()
-    yield temp_dir
-  finally:
-    shutil.rmtree(temp_dir)
-
-
-@contextlib.contextmanager
-def guard_temp_subdir(temp_dir, *path):
-  assert path, 'Path should not be empty'
-
-  try:
-    temp_subdir = os.path.join(temp_dir, *path)
-    os.makedirs(temp_subdir)
-    yield temp_subdir
-  finally:
-    shutil.rmtree(os.path.join(temp_dir, path[0]))
-
-
-@contextlib.contextmanager
-def guard_patch_module(import_name, new_val):
-  def patch(module, names, val):
-    if len(names) == 1:
-      old = getattr(module, names[0])
-      setattr(module, names[0], val)
-      return old
-    else:
-      return patch(getattr(module, names[0]), names[1:], val)
-
-  try:
-    old_val = patch(gtest_parallel, import_name.split('.'), new_val)
-    yield old_val
-  finally:
-    patch(gtest_parallel, import_name.split('.'), old_val)
-
-
