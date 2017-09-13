@@ -393,10 +393,10 @@ class TestFindTests(unittest.TestCase):
         test_data.keys(), [], options, TestTimesMock(self, test_data))
     return tasks, popen_mock
 
-  def test_tasks_are_sorted(self):
+  def test_tasks_are_sorted_in_descending_order(self):
     tasks, _ = self._call_find_tests(
         self.MULTIPLE_BINARIES_MULTIPLE_TESTS_ONE_FAILURE)
-    self.assertEqual(tasks, sorted(tasks))
+    self.assertEqual(tasks, sorted(tasks, reverse=True))
 
   def test_does_not_run_disabled_tests_by_default(self):
     tasks, popen_mock = self._call_find_tests(
