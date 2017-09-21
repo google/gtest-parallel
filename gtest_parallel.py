@@ -198,6 +198,9 @@ class Task(object):
         self.exit_code = sigint_handler.wait(task)
       except sigint_handler.ProcessWasInterrupted:
         thread.exit()
+      else:
+        if self.exit_code != 0:
+          log.write('Process exit code is %d\n' % self.exit_code)
     self.runtime_ms = int(1000 * (time.time() - begin))
     self.last_execution_time = None if self.exit_code else self.runtime_ms
 
