@@ -57,6 +57,23 @@ as such they have problem writing to hard-coded files, even if they are only
 used by that single test. `tmpfile()` and similar library functions are often
 your friends here.
 
+### Flakiness Summaries
+
+Especially for disabled tests, you might wonder how stable a test seems before
+trying to reenable it. `gtest-parallel` provides a `--print_test_summary` flag
+that can be used to generate passed/failed statistics per test.
+
+For example, to try all disabled tests and see how stable they are:
+
+    $ ./gtest-parallel path/to/binary... -r1000 --gtest_filter=*.DISABLED_* --gtest_also_run_disabled_tests --print_test_summary
+
+Which will generate something like this at the end of the run:
+
+    SUMMARY:
+      path/to/binary... Foo.DISABLED_Bar passed 0 / 1000 times.
+      path/to/binary... FooBar.DISABLED_Baz passed 30 / 1000 times.
+      path/to/binary... Foo.DISABLED_Baz passed 1000 / 1000 times.
+
 ## Running Tests Within Test Cases Sequentially
 
 Sometimes tests within a single test case use globally-shared resources
