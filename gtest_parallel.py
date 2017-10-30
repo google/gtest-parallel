@@ -293,7 +293,7 @@ class FilterFormat(object):
     destination_dir = os.path.join(self.output_dir, destination_dir)
     os.makedirs(destination_dir)
     for task in tasks:
-        shutil.move(task.log_file, destination_dir)
+      shutil.move(task.log_file, destination_dir)
 
   def print_tests(self, message, tasks, print_try_number):
     self.out.permanent_line("%s (%s/%s):" %
@@ -324,6 +324,35 @@ class FilterFormat(object):
   def log_tasks(self, total_tasks):
     self.total_tasks += total_tasks
     self.out.transient_line("[0/%d] Running tests..." % self.total_tasks)
+
+  def summarize(self, passed_tasks, failed_tasks, interrupted_tasks):
+    stats = {}
+    def add_stats(stats, task, idx):
+      task_key = (task.test_binary, task.test_name)
+      if not task_key in stats:
+        # (passed, failed, interrupted) task_key is added as tie breaker to get
+        # alphabetic sorting on equally-stable tests
+        stats[task_key] = [0, 0, 0, task_key]
+      stats[task_key][idx] += 1
+
+    for task in passed_tasks:
+      add_stats(stats, task, 0)
+    for task in failed_tasks:
+      add_stats(stats, task, 1)
+    for task in interrupted_tasks:
+      add_stats(stats, task, 2)
+
+    self.out.permanent_line("SUMMARY:")
+    for task_key in sorted(stats, key=stats.__getitem__):
+      (num_passed, num_failed, num_interrupted, _) = stats[task_key]
+      (test_binary, task_name) = task_key
+      self.out.permanent_line(
+          "  %s %s passed %d / %d times%s." %
+              (test_binary, task_name, num_passed,
+               num_passed + num_failed + num_interrupted,
+               "" if num_interrupted == 0 else (" (%d interrupted)" % num_interrupted)))
+
+
 
   def flush(self):
     self.out.flush_transient_output()
@@ -722,6 +751,10 @@ def main():
     logger.print_tests(
         'INTERRUPTED TESTS', task_manager.started.values(), print_try_number)
     logger.move_to('interrupted', task_manager.started.values())
+
+  if options.repeat > 1 and (task_manager.failed or task_manager.started):
+    logger.summarize(task_manager.passed, task_manager.failed,
+                     task_manager.started.values())
 
   logger.flush()
   times.write_to_file(save_file)
