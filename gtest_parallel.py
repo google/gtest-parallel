@@ -526,9 +526,9 @@ def find_tests(binaries, additional_args, options, times):
       list_command += ['--gtest_filter=' + options.gtest_filter]
 
     try:
-      test_list = subprocess.Popen(list_command,
-                                   stdout=subprocess.PIPE).communicate()[0]
-    except OSError as e:
+      test_list = subprocess.check_output(list_command,
+                                          stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
       sys.exit("%s: %s" % (test_binary, str(e)))
 
     command += additional_args + ['--gtest_color=' + options.gtest_color]
