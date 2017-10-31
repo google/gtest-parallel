@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import collections
 import contextlib
 import gtest_parallel
 import os.path
@@ -21,11 +20,10 @@ import shutil
 import sys
 import tempfile
 import threading
-import time
 import unittest
 
 from gtest_parallel_mocks import LoggerMock
-from gtest_parallel_mocks import PopenMock
+from gtest_parallel_mocks import SubprocessMock
 from gtest_parallel_mocks import TestTimesMock
 from gtest_parallel_mocks import TestResultsMock
 from gtest_parallel_mocks import TaskManagerMock
@@ -386,12 +384,12 @@ class TestFindTests(unittest.TestCase):
     return options
 
   def _call_find_tests(self, test_data, options=None):
-    popen_mock = PopenMock(test_data)
+    subprocess_mock = SubprocessMock(test_data)
     options = self._process_options(options or [])
-    with guard_patch_module('subprocess.Popen', popen_mock):
+    with guard_patch_module('subprocess.check_output', subprocess_mock):
       tasks = gtest_parallel.find_tests(
         test_data.keys(), [], options, TestTimesMock(self, test_data))
-    return tasks, popen_mock
+    return tasks, subprocess_mock
 
   def test_tasks_are_sorted(self):
     tasks, _ = self._call_find_tests(
@@ -400,22 +398,22 @@ class TestFindTests(unittest.TestCase):
                      [None, 4, 4, 3, 2])
 
   def test_does_not_run_disabled_tests_by_default(self):
-    tasks, popen_mock = self._call_find_tests(
+    tasks, subprocess_mock = self._call_find_tests(
         self.ONE_DISABLED_ONE_ENABLED_TEST)
     self.assertEqual(len(tasks), 1)
     self.assertFalse("DISABLED_" in tasks[0].test_name)
     self.assertNotIn("--gtest_also_run_disabled_tests",
-                     popen_mock.last_invocation)
+                     subprocess_mock.last_invocation)
 
   def test_runs_disabled_tests_when_asked(self):
-    tasks, popen_mock = self._call_find_tests(
+    tasks, subprocess_mock = self._call_find_tests(
         self.ONE_DISABLED_ONE_ENABLED_TEST,
         ['--gtest_also_run_disabled_tests'])
     self.assertEqual(len(tasks), 2)
     self.assertEqual(sorted([task.test_name for task in tasks]),
                      ["FakeTest.DISABLED_Test2", "FakeTest.Test1"])
     self.assertIn("--gtest_also_run_disabled_tests",
-                  popen_mock.last_invocation)
+                  subprocess_mock.last_invocation)
 
   def test_runs_failed_tests_by_default(self):
     tasks, _ = self._call_find_tests(self.ONE_FAILED_ONE_PASSED_TEST)
@@ -434,15 +432,15 @@ class TestFindTests(unittest.TestCase):
     self.assertIsNone(tasks[0].last_execution_time)
 
   def test_does_not_apply_gtest_filter_by_default(self):
-    _, popen_mock = self._call_find_tests(self.ONE_TEST)
+    _, subprocess_mock = self._call_find_tests(self.ONE_TEST)
     self.assertFalse(any(
         arg.startswith('--gtest_filter=SomeFilter')
-        for arg in popen_mock.last_invocation
+        for arg in subprocess_mock.last_invocation
     ))
   def test_applies_gtest_filter(self):
-    _, popen_mock = self._call_find_tests(
+    _, subprocess_mock = self._call_find_tests(
         self.ONE_TEST, ['--gtest_filter=SomeFilter'])
-    self.assertIn('--gtest_filter=SomeFilter', popen_mock.last_invocation)
+    self.assertIn('--gtest_filter=SomeFilter', subprocess_mock.last_invocation)
 
   def test_applies_gtest_color_by_default(self):
     tasks, _ = self._call_find_tests(self.ONE_TEST)
@@ -470,6 +468,15 @@ class TestFindTests(unittest.TestCase):
     # Test tasks have consecutive execution_numbers starting from 1
     self.assertEqual(sorted(task.execution_number for task in tasks),
                      [1, 2, 3])
+
+  def test_gtest_list_tests_fails(self):
+    def exit_mock(*args):
+      raise AssertionError('Foo')
+
+    options = self._process_options([])
+    with guard_patch_module('sys.exit', exit_mock):
+      self.assertRaises(AssertionError, gtest_parallel.find_tests,
+                        [sys.executable], [], options, None)
 
 
 if __name__ == '__main__':

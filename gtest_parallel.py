@@ -352,8 +352,6 @@ class FilterFormat(object):
                num_passed + num_failed + num_interrupted,
                "" if num_interrupted == 0 else (" (%d interrupted)" % num_interrupted)))
 
-
-
   def flush(self):
     self.out.flush_transient_output()
 
