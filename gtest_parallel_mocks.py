@@ -12,11 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
-import contextlib
-import gtest_parallel
-import os
-import shutil
-import tempfile
 import threading
 import time
 
@@ -149,19 +144,12 @@ class TaskMock(object):
     pass
 
 
-class PopenMock(object):
-  class _SubprocessMock(object):
-    def __init__(self, stdout=""):
-      self.stdout = stdout
-
-    def communicate(self):
-      return [self.stdout]
-
+class SubprocessMock(object):
   def __init__(self, test_data=None):
     self._test_data = test_data
     self.last_invocation = None
 
-  def __call__(self, command, stdout=None):
+  def __call__(self, command, **kwargs):
     self.last_invocation = command
     binary = command[0]
     test_list = []
@@ -170,4 +158,4 @@ class PopenMock(object):
       test_list.append(test_group + ".")
       for test in sorted(tests):
         test_list.append("  " + test)
-    return self._SubprocessMock('\n'.join(test_list))
+    return '\n'.join(test_list)
