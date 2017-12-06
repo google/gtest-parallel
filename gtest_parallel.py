@@ -763,3 +763,6 @@ def main():
     return -signal.SIGINT
 
   return task_manager.global_exit_code
+
+if __name__ == "__main__":
+  sys.exit(main())
