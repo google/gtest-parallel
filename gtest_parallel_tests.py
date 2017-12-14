@@ -315,8 +315,8 @@ class TestTask(unittest.TestCase):
       return 'C:\\' if sys.platform == 'win32' else '/'
 
     self.assertEqual(
-      'bin-Test_case-100.log',
-      gtest_parallel.Task._logname('', 'bin', 'Test.case', 100))
+      './bin-Test_case-100.log',
+      gtest_parallel.Task._logname('.', 'bin', 'Test.case', 100))
 
     self.assertEqual(
       os.path.join('..', 'a', 'b', 'bin-Test_case_2-1.log'),
@@ -342,6 +342,7 @@ class TestTask(unittest.TestCase):
                                    os.path.join(root(), 'c', 'd', 'bin'),
                                    'Test.case', 1))
 
+  def test_logs_to_temporary_files_without_output_dir(self):
     log_file = gtest_parallel.Task._logname(None, None, None, None)
     self.assertEqual(tempfile.gettempdir(), os.path.dirname(log_file))
     os.remove(log_file)

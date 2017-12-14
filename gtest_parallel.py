@@ -184,8 +184,10 @@ class Task(object):
 
   @staticmethod
   def _logname(output_dir, test_binary, test_name, execution_number):
+    # Store logs to temporary files if there is no output_dir.
     if output_dir is None:
-      (log_handle, log_name) = tempfile.mkstemp(prefix='tmpGP_', suffix=".log")
+      (log_handle, log_name) = tempfile.mkstemp(prefix='gtest_parallel_',
+                                                suffix=".log")
       os.close(log_handle)
       return log_name
 
@@ -687,11 +689,15 @@ def main():
 
   parser = default_options_parser()
   (options, binaries) = parser.parse_args()
+
+  if not options.output_dir or not os.path.isdir(options.output_dir):
+    options.output_dir = None
+
   # Append gtest-parallel-logs to log output, this is to avoid deleting user
   # data if an user passes a directory where files are already present. If a
   # user specifies --output_dir=Docs/, we'll create Docs/gtest-parallel-logs
   # and clean that directory out on startup, instead of nuking Docs/.
-  if options.output_dir is not None:
+  if options.output_dir:
     options.output_dir = os.path.join(options.output_dir,
                                       'gtest-parallel-logs')
 
@@ -714,7 +720,7 @@ def main():
   assert len(unique_binaries) == len(binaries), (
       "All test binaries must have an unique basename.")
 
-  if options.output_dir is not None:
+  if options.output_dir:
     # Remove files from old test runs.
     if os.path.isdir(options.output_dir):
       shutil.rmtree(options.output_dir)
