@@ -690,8 +690,10 @@ def main():
   parser = default_options_parser()
   (options, binaries) = parser.parse_args()
 
-  if not options.output_dir or not os.path.isdir(options.output_dir):
-    options.output_dir = None
+  if (options.output_dir is not None and
+      not os.path.isdir(options.output_dir)):
+    parser.error('--output_dir value must be an existing directory, '
+                 'current value is "%s"' % options.output_dir)
 
   # Append gtest-parallel-logs to log output, this is to avoid deleting user
   # data if an user passes a directory where files are already present. If a
