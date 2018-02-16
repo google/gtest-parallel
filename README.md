@@ -88,12 +88,3 @@ For such binaries where test cases are independent, `gtest-parallel` provides
 `--serialize_test_cases` that runs tests within the same test case sequentially.
 While generally not providing as much speedup as fully parallel test execution,
 this permits such binaries to partially benefit from parallel execution.
-
-## Multiple Invocations
-
-When running multiple `gtest-parallel` instances, separate `--output_dir`
-locations should be used. `gtest-parallel` cleans out this directory on startup,
-to avoid mixing old stale logs with new ones. This will discard any logs from
-ongoing invocations, or otherwise fail (throw) because the files are in use
-(depending on platform). This is not enforced by a lock file as cleaning these
-up would require unnecessary user intervention.

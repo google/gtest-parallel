@@ -315,7 +315,7 @@ class TestTask(unittest.TestCase):
       return 'C:\\' if sys.platform == 'win32' else '/'
 
     self.assertEqual(
-      './bin-Test_case-100.log',
+      os.path.join('.', 'bin-Test_case-100.log'),
       gtest_parallel.Task._logname('.', 'bin', 'Test.case', 100))
 
     self.assertEqual(
