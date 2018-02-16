@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import contextlib
-import gtest_parallel
 import os.path
 import random
 import shutil
@@ -21,6 +20,8 @@ import sys
 import tempfile
 import threading
 import unittest
+
+import gtest_parallel
 
 from gtest_parallel_mocks import LoggerMock
 from gtest_parallel_mocks import SubprocessMock
@@ -287,6 +288,14 @@ class TestTestTimes(unittest.TestCase):
 
           times.write_to_file(save_file)
 
+        self.assertEqual(
+          1000,
+          times.get_test_time('{}-{}'.format(path_to_binary, cnt),
+                              'TestFoo.testBar'))
+        self.assertIsNone(
+          times.get_test_time('{}-{}'.format(path_to_binary, cnt),
+                              'baz'))
+
       t = threading.Thread(target=test_times_worker)
       t.start()
       return t
@@ -300,14 +309,14 @@ class TestTestTimes(unittest.TestCase):
           worker.join()
 
 
-class TestFilterFormat(unittest.TestCase):
+class TestTask(unittest.TestCase):
   def test_log_file_names(self):
     def root():
       return 'C:\\' if sys.platform == 'win32' else '/'
 
     self.assertEqual(
-      'bin-Test_case-100.log',
-      gtest_parallel.Task._logname('', 'bin', 'Test.case', 100))
+      './bin-Test_case-100.log',
+      gtest_parallel.Task._logname('.', 'bin', 'Test.case', 100))
 
     self.assertEqual(
       os.path.join('..', 'a', 'b', 'bin-Test_case_2-1.log'),
@@ -332,6 +341,134 @@ class TestFilterFormat(unittest.TestCase):
       gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
                                    os.path.join(root(), 'c', 'd', 'bin'),
                                    'Test.case', 1))
+
+  def test_logs_to_temporary_files_without_output_dir(self):
+    log_file = gtest_parallel.Task._logname(None, None, None, None)
+    self.assertEqual(tempfile.gettempdir(), os.path.dirname(log_file))
+    os.remove(log_file)
+
+  def _execute_run_test(self, run_test_body, interrupt_test):
+    def popen_mock(*_args, **_kwargs):
+      return None
+
+    class SigHandlerMock(object):
+      class ProcessWasInterrupted(Exception):
+        pass
+
+      def wait(*_args):
+        if interrupt_test:
+          raise SigHandlerMock.ProcessWasInterrupted()
+
+        return 42
+
+    with guard_temp_dir() as temp_dir, \
+        guard_patch_module('subprocess.Popen', popen_mock), \
+        guard_patch_module('sigint_handler', SigHandlerMock()), \
+        guard_patch_module('thread.exit', lambda: None):
+      run_test_body(temp_dir)
+
+  def test_run_normal_task(self):
+    def run_test(temp_dir):
+      task = gtest_parallel.Task('fake/binary', 'test', ['fake/binary'],
+                                 1, None, temp_dir)
+
+      self.assertFalse(os.path.isfile(task.log_file))
+
+      task.run()
+
+      self.assertTrue(os.path.isfile(task.log_file))
+      self.assertEqual(42, task.exit_code)
+
+    self._execute_run_test(run_test, False)
+
+  def test_run_interrupted_task_with_transient_log(self):
+    def run_test(_):
+      task = gtest_parallel.Task('fake/binary', 'test', ['fake/binary'],
+                                 1, None, None)
+
+      self.assertTrue(os.path.isfile(task.log_file))
+
+      task.run()
+
+      self.assertTrue(os.path.isfile(task.log_file))
+      self.assertIsNone(task.exit_code)
+
+    self._execute_run_test(run_test, True)
+
+
+class TestFilterFormat(unittest.TestCase):
+  def _execute_test(self, test_body, drop_output):
+    class StdoutMock(object):
+      def isatty(*_args):
+        return False
+
+      def write(*args):
+        pass
+
+    with guard_temp_dir() as temp_dir, \
+        guard_patch_module('sys.stdout', StdoutMock()):
+      logger = gtest_parallel.FilterFormat(None if drop_output else temp_dir)
+      logger.log_tasks(42)
+
+      test_body(logger)
+
+      logger.flush()
+
+  def test_no_output_dir(self):
+    def run_test(logger):
+      passed = [
+          TaskMock(
+            ('fake/binary', 'FakeTest'), 0, {
+              'runtime_ms': [10],
+              'exit_code': [0],
+              'last_execution_time': [10],
+              'log_file': [os.path.join(tempfile.gettempdir(), 'fake.log')]
+          })
+      ]
+
+      open(passed[0].log_file, 'w').close()
+      self.assertTrue(os.path.isfile(passed[0].log_file))
+
+      logger.log_exit(passed[0])
+
+      self.assertFalse(os.path.isfile(passed[0].log_file))
+
+      logger.print_tests('', passed, True)
+      logger.move_to(None, passed)
+
+      logger.summarize(passed, [], [])
+
+    self._execute_test(run_test, True)
+
+  def test_with_output_dir(self):
+    def run_test(logger):
+      failed = [
+          TaskMock(
+            ('fake/binary', 'FakeTest'), 0, {
+              'runtime_ms': [10],
+              'exit_code': [1],
+              'last_execution_time': [10],
+              'log_file': [os.path.join(logger.output_dir, 'fake.log')]
+          })
+      ]
+
+      open(failed[0].log_file, 'w').close()
+      self.assertTrue(os.path.isfile(failed[0].log_file))
+
+      logger.log_exit(failed[0])
+
+      self.assertTrue(os.path.isfile(failed[0].log_file))
+
+      logger.print_tests('', failed, True)
+      logger.move_to('failed', failed)
+
+      self.assertFalse(os.path.isfile(failed[0].log_file))
+      self.assertTrue(
+        os.path.isfile(os.path.join(logger.output_dir, 'failed', 'fake.log')))
+
+      logger.summarize([], failed, [])
+
+    self._execute_test(run_test, False)
 
 
 class TestFindTests(unittest.TestCase):
@@ -389,6 +526,11 @@ class TestFindTests(unittest.TestCase):
     with guard_patch_module('subprocess.check_output', subprocess_mock):
       tasks = gtest_parallel.find_tests(
         test_data.keys(), [], options, TestTimesMock(self, test_data))
+    # Clean transient tasks' log files created because
+    # by default now output_dir is None.
+    for task in tasks:
+      if os.path.isfile(task.log_file):
+        os.remove(task.log_file)
     return tasks, subprocess_mock
 
   def test_tasks_are_sorted(self):
@@ -437,6 +579,7 @@ class TestFindTests(unittest.TestCase):
         arg.startswith('--gtest_filter=SomeFilter')
         for arg in subprocess_mock.last_invocation
     ))
+
   def test_applies_gtest_filter(self):
     _, subprocess_mock = self._call_find_tests(
         self.ONE_TEST, ['--gtest_filter=SomeFilter'])

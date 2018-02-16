@@ -133,6 +133,10 @@ class TaskMock(object):
     self.exit_code = test_data['exit_code'][execution_number]
     self.last_execution_time = (
         test_data['last_execution_time'][execution_number])
+    if 'log_file' in test_data:
+      self.log_file = test_data['log_file'][execution_number]
+    else:
+      self.log_file = None
     self.test_command = None
     self.output_dir = None
 
