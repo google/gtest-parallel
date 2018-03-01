@@ -331,7 +331,23 @@ class FilterFormat(object):
              task.exit_code, task.runtime_ms))
 
     if self.output_dir is None:
-      os.remove(task.log_file)
+      # Try to remove the file 100 times (sleeping for 0.1 second in between).
+      # This is a workaround for a process handle seemingly holding on to the
+      # file for too long inside os.subprocess. This workaround is in place
+      # until we figure out a minimal repro to report upstream (or a better
+      # suspect) to prevent os.remove exceptions.
+      num_tries = 100
+      for i in range(num_tries):
+        try:
+          os.remove(task.log_file)
+        except OSError as e:
+          if e.errno is not errno.ENOENT:
+            if i is num_tries - 1:
+              self.out.permanent_line('Could not remove temporary log file: ' + str(e))
+            else:
+              time.sleep(0.1)
+            continue
+        break
 
   def log_tasks(self, total_tasks):
     self.total_tasks += total_tasks
