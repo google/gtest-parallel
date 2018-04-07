@@ -28,7 +28,6 @@ import tempfile
 import thread
 import threading
 import time
-import zlib
 import datetime
 
 if sys.platform == 'win32':
@@ -187,6 +186,13 @@ class Task(object):
 
   @staticmethod
   def _logname(output_dir, test_binary, test_name, execution_number):
+    # Store logs to temporary files if there is no output_dir.
+    if output_dir is None:
+      (log_handle, log_name) = tempfile.mkstemp(prefix='gtest_parallel_',
+                                                suffix=".log")
+      os.close(log_handle)
+      return log_name
+
     log_name = '%s-%s-%d.log' % (Task._normalize(os.path.basename(test_binary)),
                                  Task._normalize(test_name), execution_number)
 
@@ -243,12 +249,11 @@ class TaskManager(object):
       self.started[task.task_id] = task
 
   def __register_exit(self, task):
+    for sink in self.test_results:
+      sink.log(task)
     self.logger.log_exit(task)
     self.times.record_test_time(task.test_binary, task.test_name,
                                 task.last_execution_time)
-    for sink in self.test_results:
-      sink.log(task)
-
     with self.lock:
       self.started.pop(task.task_id)
       if task.exit_code == 0:
@@ -292,6 +297,9 @@ class FilterFormat(object):
     self.stdout_lock = threading.Lock()
 
   def move_to(self, destination_dir, tasks):
+    if self.output_dir is None:
+      return
+
     destination_dir = os.path.join(self.output_dir, destination_dir)
     os.makedirs(destination_dir)
     for task in tasks:
@@ -322,6 +330,25 @@ class FilterFormat(object):
           "[%d/%d] %s returned/aborted with exit code %d (%d ms)"
           % (self.finished_tasks, self.total_tasks, task.test_name,
              task.exit_code, task.runtime_ms))
+
+    if self.output_dir is None:
+      # Try to remove the file 100 times (sleeping for 0.1 second in between).
+      # This is a workaround for a process handle seemingly holding on to the
+      # file for too long inside os.subprocess. This workaround is in place
+      # until we figure out a minimal repro to report upstream (or a better
+      # suspect) to prevent os.remove exceptions.
+      num_tries = 100
+      for i in range(num_tries):
+        try:
+          os.remove(task.log_file)
+        except OSError as e:
+          if e.errno is not errno.ENOENT:
+            if i is num_tries - 1:
+              self.out.permanent_line('Could not remove temporary log file: ' + str(e))
+            else:
+              time.sleep(0.1)
+            continue
+        break
 
   def log_tasks(self, total_tasks):
     self.total_tasks += total_tasks
@@ -705,8 +732,7 @@ def default_options_parser():
   parser = optparse.OptionParser(
       usage = 'usage: %prog [options] binary [binary ...] -- [additional args]')
 
-  parser.add_option('-d', '--output_dir', type='string',
-                    default=tempfile.gettempdir(),
+  parser.add_option('-d', '--output_dir', type='string', default=None,
                     help='Output directory for test logs. Logs will be '
                          'available under gtest-parallel-logs/, so '
                          '--output_dir=/tmp will results in all logs being '
@@ -763,11 +789,19 @@ def main():
 
   parser = default_options_parser()
   (options, binaries) = parser.parse_args()
+
+  if (options.output_dir is not None and
+      not os.path.isdir(options.output_dir)):
+    parser.error('--output_dir value must be an existing directory, '
+                 'current value is "%s"' % options.output_dir)
+
   # Append gtest-parallel-logs to log output, this is to avoid deleting user
   # data if an user passes a directory where files are already present. If a
   # user specifies --output_dir=Docs/, we'll create Docs/gtest-parallel-logs
   # and clean that directory out on startup, instead of nuking Docs/.
-  options.output_dir = os.path.join(options.output_dir, 'gtest-parallel-logs')
+  if options.output_dir:
+    options.output_dir = os.path.join(options.output_dir,
+                                      'gtest-parallel-logs')
 
   if binaries == []:
     parser.print_usage()
@@ -788,16 +822,17 @@ def main():
   assert len(unique_binaries) == len(binaries), (
       "All test binaries must have an unique basename.")
 
-  # Remove files from old test runs.
-  if os.path.isdir(options.output_dir):
-    shutil.rmtree(options.output_dir)
-  # Create directory for test log output.
-  try:
-    os.makedirs(options.output_dir)
-  except OSError as e:
-    # Ignore errors if this directory already exists.
-    if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
-      raise e
+  if options.output_dir:
+    # Remove files from old test runs.
+    if os.path.isdir(options.output_dir):
+      shutil.rmtree(options.output_dir)
+    # Create directory for test log output.
+    try:
+      os.makedirs(options.output_dir)
+    except OSError as e:
+      # Ignore errors if this directory already exists.
+      if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
+        raise e
 
   timeout = None
   if options.timeout is not None:
