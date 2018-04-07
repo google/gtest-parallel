@@ -97,3 +97,15 @@ to avoid mixing old stale logs with new ones. This will discard any logs from
 ongoing invocations, or otherwise fail (throw) because the files are in use
 (depending on platform). This is not enforced by a lock file as cleaning these
 up would require unnecessary user intervention.
+
+## XML Output
+
+This script is able to save test results in XML format. Use
+`--dump_xml_test_results=` to enable XML output and specify file name.
+By default standard error and output are saved in XML for failed tests.
+Include `--dump_xml_all_logs` in command line to save output of all logs.
+
+For example:
+
+    $ ./gtest-parallel path/to/binary... --dump_xml_test_results=example.xml --dump_xml_all_logs
+
