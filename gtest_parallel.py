@@ -15,6 +15,7 @@ import cPickle
 import errno
 import gzip
 import json
+import xml.etree.cElementTree as ET
 import multiprocessing
 import optparse
 import os
@@ -28,6 +29,7 @@ import thread
 import threading
 import time
 import zlib
+import datetime
 
 if sys.platform == 'win32':
   import msvcrt
@@ -198,6 +200,7 @@ class Task(object):
         self.exit_code = sigint_handler.wait(task)
       except sigint_handler.ProcessWasInterrupted:
         thread.exit()
+
     self.runtime_ms = int(1000 * (time.time() - begin))
     self.last_execution_time = None if self.exit_code else self.runtime_ms
 
@@ -243,9 +246,8 @@ class TaskManager(object):
     self.logger.log_exit(task)
     self.times.record_test_time(task.test_binary, task.test_name,
                                 task.last_execution_time)
-    if self.test_results:
-      self.test_results.log(task.test_name, task.runtime_ms,
-                            "PASS" if task.exit_code == 0 else "FAIL")
+    for sink in self.test_results:
+      sink.log(task)
 
     with self.lock:
       self.started.pop(task.task_id)
@@ -356,7 +358,7 @@ class FilterFormat(object):
     self.out.flush_transient_output()
 
 
-class CollectTestResults(object):
+class CollectJSONTestResults(object):
   def __init__(self, json_dump_filepath):
     self.test_results_lock = threading.Lock()
     self.json_dump_file = open(json_dump_filepath, 'w')
@@ -374,25 +376,104 @@ class CollectTestResults(object):
         "tests": {},
     }
 
-  def log(self, test, runtime_ms, actual_result):
+  def log(self, task):
+    actual_result = "PASS" if task.exit_code == 0 else "FAIL"
     with self.test_results_lock:
       self.test_results['num_failures_by_type'][actual_result] += 1
       results = self.test_results['tests']
-      for name in test.split('.'):
+      for name in task.test_name.split('.'):
         results = results.setdefault(name, {})
 
       if results:
         results['actual'] += ' ' + actual_result
-        results['times'].append(runtime_ms)
+        results['times'].append(task.runtime_ms)
       else:  # This is the first invocation of the test
         results['actual'] = actual_result
-        results['times'] = [runtime_ms]
-        results['time'] = runtime_ms
+        results['times'] = [task.runtime_ms]
+        results['time'] = task.runtime_ms
         results['expected'] = 'PASS'
 
   def dump_to_file_and_close(self):
     json.dump(self.test_results, self.json_dump_file)
     self.json_dump_file.close()
+
+
+class CollectXMLTestResults(object):
+  def __init__(self, xml_dump_filepath, all_logs):
+    self.test_results_lock = threading.Lock()
+    # Include in XML standard output of succeeded test
+    self.all_logs = all_logs
+    self.xml_dump_filepath = xml_dump_filepath
+    self.test_results = {
+      "tag": "testsuites",
+      "attrib": {
+        "name": "AllTests",
+        "disabled": 0,
+        "errors": 0,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "time": 0,
+      },
+      "children": {},
+    }
+
+  def log(self, task):
+    failed = task.exit_code != 0
+    with self.test_results_lock:
+      task_name = task.test_name.split('.')
+      group_name = task_name[0]
+      test_name = '.'.join(task_name[1:])
+      group = self.test_results['children'].setdefault(group_name, {
+        "tag": "testsuite",
+        "attrib": {
+          "name": group_name,
+          "disabled": 0,
+          "errors": 0,
+        },
+        "children": {},
+      })
+      assert test_name not in group['children'], "Multiple runs are not supported with XML test results output"
+      log_text = None
+      if failed or self.all_logs:
+        with open(task.log_file, 'r') as fh:
+          log_text = fh.read()
+      group['children'][test_name] = {
+        "tag": "testcase",
+        "attrib": {
+          "name": test_name,
+          "status": "run",
+          "time": task.runtime_ms/1000.0,
+          "classname": group_name,
+        },
+        "failed": int(failed),
+        "output": log_text,
+      }
+
+  @staticmethod
+  def _to_str(attrs):
+    return {key: str(value) for key, value in attrs.items()}
+
+  def dump_to_file_and_close(self):
+    # Summarize attributes
+    groups = self.test_results['children'].values()
+    for group in groups:
+      tests = group['children'].values()
+      group_attrib = group['attrib']
+      group_attrib['time'] = sum(test['attrib']['time'] for test in tests)
+      group_attrib['failures'] = sum(test['failed'] for test in tests)
+      group_attrib['tests'] = len(group['children'])
+    root_attrib = self.test_results['attrib']
+    root_attrib['time'] = sum(group['attrib']['time'] for group in groups)
+    root_attrib['failures'] = sum(group['attrib']['failures'] for group in groups)
+    root_attrib['tests'] = sum(group['attrib']['tests'] for group in groups)
+    xroot = ET.Element('testsuites', self._to_str(root_attrib))
+    for group in groups:
+      xgroup = ET.SubElement(xroot, 'testsuite', self._to_str(group['attrib']))
+      for test in group['children'].values():
+        xtest = ET.SubElement(xgroup, 'testcase', self._to_str(test['attrib']))
+        if test['output']:
+          ET.SubElement(xgroup, 'system-out').text = test['output']
+    ET.ElementTree(xroot).write(self.xml_dump_filepath, encoding = 'UTF-8')
+
 
 
 # Record of test runtimes. Has built-in locking.
@@ -657,6 +738,10 @@ def default_options_parser():
                     help='Saves the results of the tests as a JSON machine-'
                          'readable file. The format of the file is specified at '
                          'https://www.chromium.org/developers/the-json-test-results-format')
+  parser.add_option('--dump_xml_test_results', type='string', default=None,
+                    help='Saves the results of the tests as a XML')
+  parser.add_option('--dump_xml_all_logs', action='store_true', default=False,
+                    help='Enables saving of all logs in XML results')
   parser.add_option('--timeout', type='int', default=None,
                     help='Interrupt all remaining processes after the given '
                          'time (in seconds).')
@@ -718,9 +803,12 @@ def main():
   if options.timeout is not None:
     timeout = threading.Timer(options.timeout, sigint_handler.interrupt)
 
-  test_results = None
+  test_results = []
   if options.dump_json_test_results is not None:
-    test_results = CollectTestResults(options.dump_json_test_results)
+    test_results.append(CollectJSONTestResults(options.dump_json_test_results))
+
+  if options.dump_xml_test_results is not None:
+    test_results.append(CollectXMLTestResults(options.dump_xml_test_results, options.dump_xml_all_logs))
 
   save_file = get_save_file_path()
 
@@ -756,8 +844,8 @@ def main():
 
   logger.flush()
   times.write_to_file(save_file)
-  if test_results:
-    test_results.dump_to_file_and_close()
+  for sink in test_results:
+    sink.dump_to_file_and_close()
 
   if sigint_handler.got_sigint():
     return -signal.SIGINT
