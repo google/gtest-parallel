@@ -497,8 +497,10 @@ class CollectXMLTestResults(object):
       xgroup = ET.SubElement(xroot, 'testsuite', self._to_str(group['attrib']))
       for test in group['children'].values():
         xtest = ET.SubElement(xgroup, 'testcase', self._to_str(test['attrib']))
+        if test['failed']:
+          ET.SubElement(xtest, 'failure', {'message': 'exit status is not 0',})
         if test['output']:
-          ET.SubElement(xgroup, 'system-out').text = test['output']
+          ET.SubElement(xtest, 'system-out').text = test['output']
     ET.ElementTree(xroot).write(self.xml_dump_filepath, encoding = 'UTF-8')
 
 
