@@ -157,7 +157,7 @@ class SubprocessMock(object):
     self.last_invocation = command
     binary = command[0]
     test_list = []
-    tests_for_binary = sorted(self._test_data.get(binary, {}).iteritems())
+    tests_for_binary = sorted(self._test_data.get(binary, {}).items())
     for test_group, tests in tests_for_binary:
       test_list.append(test_group + ".")
       for test in sorted(tests):

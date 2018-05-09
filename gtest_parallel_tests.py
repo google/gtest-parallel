@@ -109,7 +109,7 @@ class TestTaskManager(unittest.TestCase):
     for test_id, expected in tasks:
       task = task_mock_factory.get_task(test_id)
       task_manager.run_task(task)
-      expected['execution_number'] = range(len(expected['exit_code']))
+      expected['execution_number'] = list(range(len(expected['exit_code'])))
 
       logger.assertRecorded(test_id, expected, retries + 1)
       times.assertRecorded(test_id, expected, retries + 1)
@@ -562,8 +562,8 @@ class TestFindTests(unittest.TestCase):
     self.assertEqual(len(tasks), 2)
     self.assertEqual(sorted([task.test_name for task in tasks]),
                      ["FakeTest.FailedTest", "FakeTest.Test"])
-    self.assertEqual(sorted([task.last_execution_time for task in tasks]),
-                     [None, 1])
+    self.assertEqual({task.last_execution_time for task in tasks},
+                     {None, 1})
 
   def test_runs_only_failed_tests_when_asked(self):
     tasks, _ = self._call_find_tests(
