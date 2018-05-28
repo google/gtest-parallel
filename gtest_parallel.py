@@ -153,7 +153,7 @@ class Task(object):
   executed, the slowest tests are run first.
   """
   def __init__(self, test_binary, test_name, test_command, execution_number,
-               last_execution_time, output_dir):
+               last_execution_time, output_dir, output_format = ''):
     self.test_name = test_name
     self.output_dir = output_dir
     self.test_binary = test_binary
@@ -169,6 +169,8 @@ class Task(object):
 
     self.log_file = Task._logname(self.output_dir, self.test_binary,
                                   test_name, self.execution_number)
+    if output_format:
+      self.test_command = self.test_command + ['--gtest_output={0}:{1}.{0}'.format(output_format, self.log_file)]
 
   def __sorting_key(self):
     # Unseen or failing tests (both missing execution time) take precedence over
@@ -249,8 +251,8 @@ class TaskManager(object):
       self.started[task.task_id] = task
 
   def __register_exit(self, task):
-    for sink in self.test_results:
-      sink.log(task)
+    if self.test_results:
+      self.test_results.log(task)
     self.logger.log_exit(task)
     self.times.record_test_time(task.test_binary, task.test_name,
                                 task.last_execution_time)
@@ -426,83 +428,109 @@ class CollectJSONTestResults(object):
 
 
 class CollectXMLTestResults(object):
-  def __init__(self, xml_dump_filepath, all_logs):
+  def __init__(self, xml_dump_filepath, xml_format):
     self.test_results_lock = threading.Lock()
     # Include in XML standard output of succeeded test
-    self.all_logs = all_logs
+    self.include_all_logs = xml_format == 'xml-full'
     self.xml_dump_filepath = xml_dump_filepath
-    self.test_results = {
-      "tag": "testsuites",
-      "attrib": {
-        "name": "AllTests",
-        "disabled": 0,
-        "errors": 0,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "time": 0,
-      },
-      "children": {},
-    }
+    self.test_results = {}
+    self.xroot = ET.Element('testsuites', {
+      'tests': '0',
+      'failures': '0',
+      'disabled': '0',
+      'errors': '0',
+      'timestamp': str(datetime.datetime.now().isoformat()),
+      'time': '0',
+      'name': 'AllTests',
+    })
 
   def log(self, task):
     failed = task.exit_code != 0
-    with self.test_results_lock:
-      task_name = task.test_name.split('.')
-      group_name = task_name[0]
-      test_name = '.'.join(task_name[1:])
-      group = self.test_results['children'].setdefault(group_name, {
-        "tag": "testsuite",
-        "attrib": {
-          "name": group_name,
-          "disabled": 0,
-          "errors": 0,
-        },
-        "children": {},
-      })
-      assert test_name not in group['children'], "Multiple runs are not supported with XML test results output"
-      log_text = None
-      if failed or self.all_logs:
-        with open(task.log_file, 'r') as fh:
-          log_text = fh.read()
-      group['children'][test_name] = {
-        "tag": "testcase",
-        "attrib": {
-          "name": test_name,
-          "status": "run",
-          "time": task.runtime_ms/1000.0,
-          "classname": group_name,
-        },
-        "failed": int(failed),
-        "output": log_text,
-      }
+    xml_text = self._read_file(task.log_file + '.xml')
+    # Remember standard output if failed or asked to always include it in XML
+    log_text = None
+    if failed or self.include_all_logs:
+      log_text = self._read_file(task.log_file)
+    if xml_text:
+      self._merge_xml(xml_text, log_text)
+    else:
+      self._add_failed_task(task, log_text)
 
   @staticmethod
-  def _to_str(attrs):
-    return {key: str(value) for key, value in attrs.items()}
+  def _read_file(file_name):
+    if os.path.isfile(file_name):
+      with open(file_name, 'r') as fh:
+        return fh.read()
+    return None
+
+  def _merge_xml(self, xml_text, log_text):
+    tree = ET.fromstring(xml_text)
+    with self.test_results_lock:
+      for suite in tree.findall('testsuite'):
+        suite_name = suite.attrib['name']
+        new_tests = suite.findall('testcase')
+        if suite_name in self.test_results:
+          # Merge testsuite
+          suite_dict = self.test_results[suite_name]
+          tests_dict = suite_dict['tests']
+          for test in new_tests:
+            test_name = test.attrib['name']
+            # Add new testcase or replace existing succeeded one with failed one
+            if test_name in tests_dict:
+              sub_element = tests_dict[test_name]
+              if test.findall('failure') and not sub_element.findall('failure'):
+                tree.remove(sub_element)
+                del tests_dict[test_name]
+            if test_name not in tests_dict:
+              suite_dict['xml'].append(test)
+              tests_dict[test_name] = test
+        else:
+          # Copy new testsuite
+          self.xroot.append(suite)
+          tests_dict = dict()
+          for test in new_tests:
+            tests_dict[test.attrib['name']] = test
+          self.test_results[suite_name] = {'xml': suite, 'tests': tests_dict}
+        # Stuff with log
+        if log_text:
+          for test in new_tests:
+            ET.SubElement(test, 'system-out').text = log_text
+
+  def _add_failed_task(self, task, log_text):
+    # Use dummy XML in the case when task finished with error and/or but didn't produce XML file
+    task_name = task.test_name.split('.')
+    group_name = task_name[0]
+    test_name = '.'.join(task_name[1:])
+    xml_text = """
+    <testsuites>
+      <testsuite disabled="0" errors="0" failures="1" name="{0}" tests="1" time="0">
+        <testcase classname="{0}" name="{1}" status="run" time="{2}">
+          <failure message="{1} returned/aborted with exit code {3} ({4} ms), no XML file created"/>
+        </testcase>
+       </testsuite>
+    </testsuites>
+    """.format(group_name, test_name, task.runtime_ms/1000.0, task.exit_code, task.runtime_ms)
+    self._merge_xml(xml_text, log_text)
 
   def dump_to_file_and_close(self):
-    # Summarize attributes
-    groups = self.test_results['children'].values()
-    for group in groups:
-      tests = group['children'].values()
-      group_attrib = group['attrib']
-      group_attrib['time'] = sum(test['attrib']['time'] for test in tests)
-      group_attrib['failures'] = sum(test['failed'] for test in tests)
-      group_attrib['tests'] = len(group['children'])
-    root_attrib = self.test_results['attrib']
-    root_attrib['time'] = sum(group['attrib']['time'] for group in groups)
-    root_attrib['failures'] = sum(group['attrib']['failures'] for group in groups)
-    root_attrib['tests'] = sum(group['attrib']['tests'] for group in groups)
-    xroot = ET.Element('testsuites', self._to_str(root_attrib))
-    for group in groups:
-      xgroup = ET.SubElement(xroot, 'testsuite', self._to_str(group['attrib']))
-      for test in group['children'].values():
-        xtest = ET.SubElement(xgroup, 'testcase', self._to_str(test['attrib']))
-        if test['failed']:
-          ET.SubElement(xtest, 'failure', {'message': 'exit status is not 0',})
-        if test['output']:
-          ET.SubElement(xtest, 'system-out').text = test['output']
-    ET.ElementTree(xroot).write(self.xml_dump_filepath, encoding = 'UTF-8')
-
+    to_summarize = ['tests', 'failures', 'disabled', 'time']
+    summary = {x: 0 for x in to_summarize}
+    for suite in self.xroot.findall('testsuite'):
+      suite_summary = {x: 0 for x in to_summarize}
+      tests = suite.findall('testcase')
+      for test in tests:
+        if test.findall('failure'):
+          suite_summary['failures'] += 1
+        if test.attrib['name'].startswith('DISABLED'):
+          suite_summary['disabled'] += 1
+        suite_summary['time'] += float(test.attrib['time'])
+      suite_summary['tests'] = len(tests)
+      for name in to_summarize:
+        suite.attrib[name] = str(suite_summary[name])
+        summary[name] += suite_summary[name]
+    for name in to_summarize:
+      self.xroot.attrib[name] = str(summary[name])
+    ET.ElementTree(self.xroot).write(self.xml_dump_filepath, encoding = 'UTF-8')
 
 
 # Record of test runtimes. Has built-in locking.
@@ -621,7 +649,7 @@ class TestTimes(object):
       return times
 
 
-def find_tests(binaries, additional_args, options, times):
+def find_tests(binaries, additional_args, options, times, output_format):
   test_count = 0
   tasks = []
   for test_binary in binaries:
@@ -667,7 +695,7 @@ def find_tests(binaries, additional_args, options, times):
         for execution_number in range(options.repeat):
           tasks.append(Task(test_binary, test_name, test_command,
                             execution_number + 1, last_execution_time,
-                            options.output_dir))
+                            options.output_dir, output_format))
 
       test_count += 1
 
@@ -754,6 +782,11 @@ def default_options_parser():
                     help='test filter')
   parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
                     default=False, help='run disabled tests too')
+  parser.add_option('--gtest_output', type='string', default='',
+                    help='Generate an XML report in the given directory '
+                         'or with the given file name. Option format is '
+                         '--gtest_output=xml[:DIRECTORY_PATH/|:FILE_PATH] '
+                         'FILE_PATH defaults to test_detail.xml.')
   parser.add_option('--print_test_times', action='store_true', default=False,
                     help='list the run time of each test at the end of execution')
   parser.add_option('--shard_count', type='int', default=1,
@@ -766,10 +799,6 @@ def default_options_parser():
                     help='Saves the results of the tests as a JSON machine-'
                          'readable file. The format of the file is specified at '
                          'https://www.chromium.org/developers/the-json-test-results-format')
-  parser.add_option('--dump_xml_test_results', type='string', default=None,
-                    help='Saves the results of the tests as a XML')
-  parser.add_option('--dump_xml_all_logs', action='store_true', default=False,
-                    help='Enables saving of all logs in XML results')
   parser.add_option('--timeout', type='int', default=None,
                     help='Interrupt all remaining processes after the given '
                          'time (in seconds).')
@@ -777,6 +806,19 @@ def default_options_parser():
                     default=False, help='Do not run tests from the same test '
                                         'case in parallel.')
   return parser
+
+
+def parse_gtest_output(parser, value):
+  if value.find(':') < 0:
+    fmt, file_name = value, 'test_detail.xml'
+  else:
+    fmt, file_name = value.split(':', 1)
+  if fmt not in ['xml', 'xml-full']:
+    parser.error('--gtest_output option format %s is not from supported '
+                 'list: xml, xml-full.' % fmt)
+  if file_name.endswith(os.path.sep):
+    file_name += 'test_detail.xml'
+  return (fmt, file_name)
 
 
 def main():
@@ -840,12 +882,17 @@ def main():
   if options.timeout is not None:
     timeout = threading.Timer(options.timeout, sigint_handler.interrupt)
 
-  test_results = []
+  test_results = None
+  output_format = ''
   if options.dump_json_test_results is not None:
-    test_results.append(CollectJSONTestResults(options.dump_json_test_results))
+    test_results = CollectJSONTestResults(options.dump_json_test_results)
 
-  if options.dump_xml_test_results is not None:
-    test_results.append(CollectXMLTestResults(options.dump_xml_test_results, options.dump_xml_all_logs))
+  if options.gtest_output:
+    if test_results:
+      parser.error('--gtest_output and --dump_json_test_results cannot be used '
+                   'simultaneously')
+    (output_format, output_file_name) = parse_gtest_output(parser, options.gtest_output)
+    test_results = CollectXMLTestResults(output_file_name, output_format)
 
   save_file = get_save_file_path()
 
@@ -855,7 +902,7 @@ def main():
   task_manager = TaskManager(times, logger, test_results, Task,
                              options.retry_failed, options.repeat + 1)
 
-  tasks = find_tests(binaries, additional_args, options, times)
+  tasks = find_tests(binaries, additional_args, options, times, output_format)
   logger.log_tasks(len(tasks))
   execute_tasks(tasks, options.workers, task_manager,
                 timeout, options.serialize_test_cases)
@@ -881,8 +928,8 @@ def main():
 
   logger.flush()
   times.write_to_file(save_file)
-  for sink in test_results:
-    sink.dump_to_file_and_close()
+  if test_results:
+    test_results.dump_to_file_and_close()
 
   if sigint_handler.got_sigint():
     return -signal.SIGINT
