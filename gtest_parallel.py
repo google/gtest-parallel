@@ -429,9 +429,9 @@ class CollectJSONTestResults(object):
 
 class CollectXMLTestResults(object):
   def __init__(self, xml_dump_filepath, xml_format):
+    assert xml_format in {'xml', 'xml-full'}
     self.test_results_lock = threading.Lock()
-    # Include in XML standard output of succeeded test
-    self.include_all_logs = xml_format == 'xml-full'
+    self.xml_format = xml_format
     self.xml_dump_filepath = xml_dump_filepath
     self.test_results = {}
     self.xroot = ET.Element('testsuites', {
@@ -446,10 +446,10 @@ class CollectXMLTestResults(object):
 
   def log(self, task):
     failed = task.exit_code != 0
-    xml_text = self._read_file(task.log_file + '.xml')
+    xml_text = self._read_file('{}.{}'.format(task.log_file, self.xml_format))
     # Remember standard output if failed or asked to always include it in XML
     log_text = None
-    if failed or self.include_all_logs:
+    if failed or self.xml_format == 'xml-full':
       log_text = self._read_file(task.log_file)
     if xml_text:
       self._merge_xml(xml_text, log_text)
@@ -892,7 +892,10 @@ def main():
       parser.error('--gtest_output and --dump_json_test_results cannot be used '
                    'simultaneously')
     (output_format, output_file_name) = parse_gtest_output(parser, options.gtest_output)
+    # Only XML is supported
     test_results = CollectXMLTestResults(output_file_name, output_format)
+    # Hiding 'xml-full' subformat from real --gtest_output
+    output_format = 'xml'
 
   save_file = get_save_file_path()
 
