@@ -91,12 +91,16 @@ this permits such binaries to partially benefit from parallel execution.
 
 ## XML Output
 
-This script is able to save test results in XML format. Use
-`--dump_xml_test_results=` to enable XML output and specify file name.
-By default standard error and output are saved in XML for failed tests.
-Include `--dump_xml_all_logs` in command line to save output of all logs.
+This script supports saving test results as Google Test XML. Use
+`--gtest_output=FORMAT[:DIRECTORY_PATH/|:FILE_PATH]` parameter to enable
+this feature. FORMAT is either `xml` or `xml-full`. FILE_PATH defaults to
+test_detail.xml.
+
+Standard error and output are saved in `<system-out>` tag under `<testcase> tag
+in addition to other Google Test XML data. In `xml` format only failed tests
+have output saved. In `xml-full` format output is saved for all tests.
 
 For example:
 
-    $ ./gtest-parallel path/to/binary... --dump_xml_test_results=example.xml --dump_xml_all_logs
+    $ ./gtest-parallel path/to/binary... --gtest_output=xml:example.xml
 
