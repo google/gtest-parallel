@@ -446,7 +446,7 @@ class CollectXMLTestResults(object):
 
   def log(self, task):
     failed = task.exit_code != 0
-    xml_text = self._read_file('{}.{}'.format(task.log_file, self.xml_format))
+    xml_text = self._read_file(task.log_file + '.xml')
     # Remember standard output if failed or asked to always include it in XML
     log_text = None
     if failed or self.xml_format == 'xml-full':
