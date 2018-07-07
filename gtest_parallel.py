@@ -573,10 +573,16 @@ def find_tests(binaries, additional_args, options, times):
     except subprocess.CalledProcessError as e:
       sys.exit("%s: %s" % (test_binary, str(e)))
 
+    try:
+        test_list = test_list.split('\n')
+    except TypeError:
+        # subprocess.check_output() returns bytes in python3
+        test_list = test_list.decode(sys.stdout.encoding).split('\n')
+
     command += additional_args + ['--gtest_color=' + options.gtest_color]
 
     test_group = ''
-    for line in test_list.split('\n'):
+    for line in test_list:
       if not line.strip():
         continue
       if line[0] != " ":
