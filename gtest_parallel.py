@@ -14,6 +14,7 @@
 import errno
 from functools import total_ordering
 import gzip
+import io
 import json
 import multiprocessing
 import optparse
@@ -302,7 +303,14 @@ class FilterFormat(object):
   def __init__(self, output_dir):
     if sys.stdout.isatty():
       # stdout needs to be unbuffered since the output is interactive.
-      sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+      if isinstance(sys.stdout, io.TextIOWrapper):
+        # workaround for https://bugs.python.org/issue17404
+        sys.stdout = io.TextIOWrapper(sys.stdout.detach(),
+                                      line_buffering=True,
+                                      write_through=True,
+                                      newline='\n')
+      else:
+        sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 
     self.output_dir = output_dir
 
@@ -573,10 +581,16 @@ def find_tests(binaries, additional_args, options, times):
     except subprocess.CalledProcessError as e:
       sys.exit("%s: %s" % (test_binary, str(e)))
 
+    try:
+        test_list = test_list.split('\n')
+    except TypeError:
+        # subprocess.check_output() returns bytes in python3
+        test_list = test_list.decode(sys.stdout.encoding).split('\n')
+
     command += additional_args + ['--gtest_color=' + options.gtest_color]
 
     test_group = ''
-    for line in test_list.split('\n'):
+    for line in test_list:
       if not line.strip():
         continue
       if line[0] != " ":
