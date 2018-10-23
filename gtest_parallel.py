@@ -579,7 +579,7 @@ def find_tests(binaries, additional_args, options, times):
       test_list = subprocess.check_output(list_command,
                                           stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-      sys.exit("%s: %s" % (test_binary, str(e)))
+      sys.exit("%s: %s\n%s" % (test_binary, str(e), e.output))
 
     try:
         test_list = test_list.split('\n')
