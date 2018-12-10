@@ -398,10 +398,12 @@ class FilterFormat(object):
     for task_key in sorted(stats, key=stats.__getitem__):
       (num_passed, num_failed, num_interrupted, _) = stats[task_key]
       (test_binary, task_name) = task_key
+      total_runs = num_passed + num_failed + num_interrupted
+      if num_passed == total_runs:
+        continue
       self.out.permanent_line(
           "  %s %s passed %d / %d times%s." %
-              (test_binary, task_name, num_passed,
-               num_passed + num_failed + num_interrupted,
+              (test_binary, task_name, num_passed, total_runs,
                "" if num_interrupted == 0 else (" (%d interrupted)" % num_interrupted)))
 
   def flush(self):
