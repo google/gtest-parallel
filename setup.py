@@ -15,10 +15,6 @@
 
 from setuptools import find_packages, setup
 
-# This reads the __version__ variable from gtest-parallel/version.py
-with open('gtest-parallel/version.py') as f:
-  exec(f.read(), globals())
-
 description = ('Run Google Test suites in parallel.')
 
 # Reading long Description from README.md file.
@@ -27,7 +23,6 @@ with open("README.md", "r") as fh:
 
 setup(
     name = 'gtest-parallel',
-    version = __version__,
     url = 'http://github.com/google/gtest-parallel',
     author = 'Google Inc.',
     author_email = 'googletestframework@googlegroups.com',
@@ -36,6 +31,7 @@ setup(
     long_description = long_description,
     long_description_content_type = "text/markdown",
     packages = find_packages(),
-    scripts=['gtest-parallel/gtest-parallel']
+    scripts=['./gtest-parallel']
+
 )
 
