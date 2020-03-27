@@ -569,7 +569,7 @@ def find_tests(binaries, additional_args, options, times):
   test_count = 0
   tasks = []
   for test_binary in binaries:
-    command = [test_binary]
+    command = [test_binary] + additional_args
     if options.gtest_also_run_disabled_tests:
       command += ['--gtest_also_run_disabled_tests']
 
@@ -589,7 +589,7 @@ def find_tests(binaries, additional_args, options, times):
         # subprocess.check_output() returns bytes in python3
         test_list = test_list.decode(sys.stdout.encoding).split('\n')
 
-    command += additional_args + ['--gtest_color=' + options.gtest_color]
+    command += ['--gtest_color=' + options.gtest_color]
 
     test_group = ''
     for line in test_list:
