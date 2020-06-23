@@ -44,6 +44,11 @@ else:
   import fcntl
 
 
+# The log file names is truncated to 256 to overcome OS limitations
+MKSTEMP_RANDOM_LEN = 12  # length of mkstemp random string being added
+NAMEMAX_DEFAULT = 255  # Limit for log file name length
+
+
 # An object that catches SIGINT sent to the Python process and notices
 # if processes passed to wait() die by SIGINT (we need to look for
 # both of those cases, because pressing Ctrl+C can result in either
@@ -204,14 +209,18 @@ class Task(object):
     # Store logs to temporary files if there is no output_dir.
     if output_dir is None:
       (log_handle, log_name) = tempfile.mkstemp(prefix='gtest_parallel_',
-                                                suffix=".log")
-      os.close(log_handle)
-      return log_name
+                                                suffix='.log')
+    else:
+      suffix = '-%d.log' % execution_number
+      prefix = '%s-%s' % (Task._normalize(os.path.basename(test_binary)),
+                          Task._normalize(test_name))
+      namemax = os.statvfs('.').f_namemax if hasattr(os, 'statvfs') else NAMEMAX_DEFAULT
+      (log_handle, log_name) = tempfile.mkstemp(prefix=prefix[:namemax - MKSTEMP_RANDOM_LEN - len(suffix)],
+                                                dir=output_dir,
+                                                suffix=suffix)
+    os.close(log_handle)
+    return log_name
 
-    log_name = '%s-%s-%d.log' % (Task._normalize(os.path.basename(test_binary)),
-                                 Task._normalize(test_name), execution_number)
-
-    return os.path.join(output_dir, log_name)
 
   def run(self):
     begin = time.time()
