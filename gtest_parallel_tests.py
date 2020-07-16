@@ -311,36 +311,44 @@ class TestTestTimes(unittest.TestCase):
 
 class TestTask(unittest.TestCase):
   def test_log_file_names(self):
-    def root():
-      return 'C:\\' if sys.platform == 'win32' else '/'
+    with tempfile.TemporaryDirectory() as root:
+      self.assertEqual(
+        os.path.join('.', 'bin-Test_case-100.log'),
+        gtest_parallel.Task._logname('.', 'bin', 'Test.case', 100))
 
-    self.assertEqual(
-      os.path.join('.', 'bin-Test_case-100.log'),
-      gtest_parallel.Task._logname('.', 'bin', 'Test.case', 100))
+      self.assertEqual(
+        os.path.join('..', 'a', 'b', 'bin-Test_case_2-1.log'),
+        gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
+                                    os.path.join('..', 'bin'),
+                                    'Test.case/2', 1))
 
-    self.assertEqual(
-      os.path.join('..', 'a', 'b', 'bin-Test_case_2-1.log'),
-      gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
-                                   os.path.join('..', 'bin'),
-                                   'Test.case/2', 1))
+      self.assertEqual(
+        os.path.join('..', 'a', 'b', 'bin-Test_case_2-5.log'),
+        gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
+                                    os.path.join(root, 'c', 'd', 'bin'),
+                                    'Test.case/2', 5))
 
-    self.assertEqual(
-      os.path.join('..', 'a', 'b', 'bin-Test_case_2-5.log'),
-      gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
-                                   os.path.join(root(), 'c', 'd', 'bin'),
-                                   'Test.case/2', 5))
+      self.assertEqual(
+        os.path.join(root, 'a', 'b', 'bin-Instantiation_Test_case_2-3.log'),
+        gtest_parallel.Task._logname(os.path.join(root, 'a', 'b'),
+                                    os.path.join('..', 'c', 'bin'),
+                                    'Instantiation/Test.case/2', 3))
 
-    self.assertEqual(
-      os.path.join(root(), 'a', 'b', 'bin-Instantiation_Test_case_2-3.log'),
-      gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
-                                   os.path.join('..', 'c', 'bin'),
-                                   'Instantiation/Test.case/2', 3))
-
-    self.assertEqual(
-      os.path.join(root(), 'a', 'b', 'bin-Test_case-1.log'),
-      gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
-                                   os.path.join(root(), 'c', 'd', 'bin'),
-                                   'Test.case', 1))
+      self.assertEqual(
+        os.path.join(root, 'a', 'b', 'bin-Test_case-1.log'),
+        gtest_parallel.Task._logname(os.path.join(root, 'a', 'b'),
+                                    os.path.join(root, 'c', 'd', 'bin'),
+                                    'Test.case', 1))
+      MAX_PREFIX_LENGTH = 240
+      long_test_name = 'a' * (os.statvfs('.').f_namemax if hasattr(os,
+                                                                   'statvfs') else MAX_PREFIX_LENGTH + 1)
+      truncated_log = gtest_parallel.Task._logname(os.path.join(root, 'out'),
+                                                   os.path.join(root, 'bin'),
+                                                   long_test_name, 1)
+      self.assertNotEqual('bin-' + long_test_name + '-1.log', os.path.basename(truncated_log))
+      self.assertTrue(truncated_log.endswith('-1.log'))
+      self.assertTrue(truncated_log.startswith(os.path.join(
+          root, 'out', 'bin-' + long_test_name[:MAX_PREFIX_LENGTH-len('bin--1.log')])))
 
   def test_logs_to_temporary_files_without_output_dir(self):
     log_file = gtest_parallel.Task._logname(None, None, None, None)
