@@ -44,11 +44,6 @@ else:
   import fcntl
 
 
-# The log file names is truncated to 256 to overcome OS limitations
-MKSTEMP_RANDOM_LEN = 12  # length of mkstemp random string being added
-NAMEMAX_DEFAULT = 255  # Limit for log file name length
-
-
 # An object that catches SIGINT sent to the Python process and notices
 # if processes passed to wait() die by SIGINT (we need to look for
 # both of those cases, because pressing Ctrl+C can result in either
@@ -206,19 +201,38 @@ class Task(object):
 
   @staticmethod
   def _logname(output_dir, test_binary, test_name, execution_number):
+    # The log file names is truncated to 256 to overcome OS limitations
+    MKSTEMP_RANDOM_LEN = 12  # length of mkstemp random string being added
+    MAX_PREFIX_LENGTH = 240  # Limit for file name mkstemp prefix
+
     # Store logs to temporary files if there is no output_dir.
     if output_dir is None:
       (log_handle, log_name) = tempfile.mkstemp(prefix='gtest_parallel_',
                                                 suffix='.log')
+      os.close(log_handle)
     else:
-      suffix = '-%d.log' % execution_number
       prefix = '%s-%s' % (Task._normalize(os.path.basename(test_binary)),
                           Task._normalize(test_name))
-      namemax = os.statvfs('.').f_namemax if hasattr(os, 'statvfs') else NAMEMAX_DEFAULT
-      (log_handle, log_name) = tempfile.mkstemp(prefix=prefix[:namemax - MKSTEMP_RANDOM_LEN - len(suffix)],
-                                                dir=output_dir,
-                                                suffix=suffix)
-    os.close(log_handle)
+      suffix = '-%d.log' % execution_number
+      log_name = os.path.join(output_dir, prefix + suffix)
+      try:
+        # check if log can be created or exists already
+        if not os.path.exists(log_name):
+          os.makedirs(output_dir, exist_ok=True)
+          with open(log_name, 'w+'):
+            pass
+          os.remove(log_name)
+      except OSError as os_error:
+        # truncate file name if error is Errno 36: File name too long
+        if os_error.errno == 36:
+          prefix_length = ((os.statvfs('.').f_namemax -
+                            MKSTEMP_RANDOM_LEN) if hasattr(os, 'statvfs') else MAX_PREFIX_LENGTH) - len(suffix)
+          (log_handle, log_name) = tempfile.mkstemp(prefix=prefix[:prefix_length],
+                                                    dir=output_dir,
+                                                    suffix=suffix)
+          os.close(log_handle)
+        else:
+          raise
     return log_name
 
 
