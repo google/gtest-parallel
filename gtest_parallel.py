@@ -300,7 +300,7 @@ class TaskManager(object):
 
 
 class FilterFormat(object):
-  def __init__(self, output_dir, print_task_status_continuously=False):
+  def __init__(self, output_dir):
     if sys.stdout.isatty():
       # stdout needs to be unbuffered since the output is interactive.
       if isinstance(sys.stdout, io.TextIOWrapper):
@@ -316,7 +316,6 @@ class FilterFormat(object):
 
     self.total_tasks = 0
     self.finished_tasks = 0
-    self.print_task_status_continuously = print_task_status_continuously
     self.out = Outputter(sys.stdout)
     self.stdout_lock = threading.Lock()
 
@@ -343,12 +342,9 @@ class FilterFormat(object):
   def log_exit(self, task):
     with self.stdout_lock:
       self.finished_tasks += 1
-      msg = "[%d/%d] %s (%d ms)" % (self.finished_tasks, self.total_tasks,
-                                    task.test_name, task.runtime_ms)
-      if self.print_task_status_continuously:
-        self.out.permanent_line(msg)
-      else:
-        self.out.transient_line(msg)
+      self.out.transient_line("[%d/%d] %s (%d ms)"
+                              % (self.finished_tasks, self.total_tasks,
+                                 task.test_name, task.runtime_ms))
       if task.exit_code != 0:
         with open(task.log_file) as f:
           for line in f.readlines():
@@ -726,10 +722,6 @@ def default_options_parser():
   parser.add_option('--serialize_test_cases', action='store_true',
                     default=False, help='Do not run tests from the same test '
                                         'case in parallel.')
-  parser.add_option('--print_task_status_continuously', action='store_true',
-                    default=False, help='Print task status continuously on a'
-                                        'separate line, instead of over'
-                                        'writing the current line.')
   return parser
 
 
@@ -801,8 +793,7 @@ def main():
   save_file = get_save_file_path()
 
   times = TestTimes(save_file)
-  logger = FilterFormat(options.output_dir,
-                        options.print_task_status_continuously)
+  logger = FilterFormat(options.output_dir)
 
   task_manager = TaskManager(times, logger, test_results, Task,
                              options.retry_failed, options.repeat + 1)
