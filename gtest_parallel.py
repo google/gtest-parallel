@@ -120,6 +120,7 @@ class Outputter(object):
   def transient_line(self, msg):
     if self.__width is None:
       self.__out_file.write(msg + "\n")
+      self.__out_file.flush()
     else:
       self.__out_file.write("\r" + msg[:self.__width].ljust(self.__width))
       self.__previous_line_was_transient = True
@@ -130,6 +131,8 @@ class Outputter(object):
   def permanent_line(self, msg):
     self.flush_transient_output()
     self.__out_file.write(msg + "\n")
+    if self.__width is None:
+      self.__out_file.flush()
 
 
 def get_save_file_path():
