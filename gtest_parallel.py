@@ -615,7 +615,6 @@ def find_tests(binaries, additional_args, options, times):
       if '.PRE_' in test_name :
         continue
 
-
       last_execution_time = times.get_test_time(test_binary, test_name)
       if options.failed and last_execution_time is not None:
         continue
