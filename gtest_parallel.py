@@ -412,6 +412,55 @@ class FilterFormat(object):
   def flush(self):
     self.out.flush_transient_output()
 
+def join_gtest_output_files(files, output_filename):
+  '''join given files into a single one'''
+  from xml.dom import minidom
+
+  base_file = files[0]
+  del files[0]
+  doc = minidom.parse(base_file)
+  testsuites_root = doc.getElementsByTagName("testsuites")[0]
+
+  def sum_tags(base, other):
+    for k in base.attributes.keys():
+      v = base.attributes[k]
+      if k in ["tests", "failures", "disabled", "errors"]:
+         base.attributes[k].value = str(int(v.value) + int(other.attributes[k].value))
+      elif k == "time":
+        base.attributes[k].value = str(round(float(v.value) + float(other.attributes[k].value), 3))
+
+  def add_testsuite(ts):
+    tag = "testsuite"
+    other = ts.getElementsByTagName(tag)[0]
+    for s in doc.getElementsByTagName(tag):
+      if s.attributes['name'].value == other.attributes['name'].value:
+        sum_tags(s, other)
+        for tc in other.getElementsByTagName("testcase"):
+          s.appendChild(tc)
+        break
+    else:
+      testsuites_root.appendChild(other)
+
+  for f in files:
+    tmp_doc = minidom.parse(f)
+    sum_tags(
+      doc.getElementsByTagName("testsuites")[0],
+      tmp_doc.getElementsByTagName("testsuites")[0]
+    )
+    add_testsuite(tmp_doc)
+
+  xmlstr = doc.toprettyxml(indent="  ")
+  # remove empty lines from pretty print
+  lines = []
+  for line in xmlstr.replace("\r", "").split("\n"):
+    l = line.rstrip()
+    if l:
+      lines.append(l)
+  xmlstr = "\n".join(lines)
+
+  with open(output_filename, 'w', encoding='utf8') as f:
+    f.write(xmlstr)
+
 
 class CollectTestResults(object):
   def __init__(self, json_dump_filepath):
@@ -729,6 +778,8 @@ def default_options_parser():
   parser.add_option('--serialize_test_cases', action='store_true',
                     default=False, help='Do not run tests from the same test '
                                         'case in parallel.')
+  parser.add_option('--gtest_output', type='string', default=None,
+                    help="Save the results to a file")
   return parser
 
 
@@ -806,6 +857,17 @@ def main():
                              options.retry_failed, options.repeat + 1)
 
   tasks = find_tests(binaries, additional_args, options, times)
+  gtest_output_files = []
+  if options.gtest_output:
+    if not options.gtest_output.startswith("xml:"):
+      raise Exception("only xml is supported as gtest_output format")
+    for task in tasks:
+      (gtest_output_handle, gtest_output_file) = tempfile.mkstemp(prefix='gtest_parallel_out_',
+                                                suffix=".xml")
+      os.close(gtest_output_handle)
+      gtest_output_files.append(gtest_output_file)
+      task.gtest_output = gtest_output_file
+      task.test_command += ["--gtest_output=xml:{}".format(task.gtest_output)]
   logger.log_tasks(len(tasks))
   execute_tasks(tasks, options.workers, task_manager,
                 timeout, options.serialize_test_cases)
@@ -833,6 +895,8 @@ def main():
   times.write_to_file(save_file)
   if test_results:
     test_results.dump_to_file_and_close()
+  if options.gtest_output:
+    join_gtest_output_files(gtest_output_files, options.gtest_output[4:])
 
   if sigint_handler.got_sigint():
     return -signal.SIGINT
