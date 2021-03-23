@@ -779,7 +779,7 @@ def default_options_parser():
                     default=False, help='Do not run tests from the same test '
                                         'case in parallel.')
   parser.add_option('--gtest_output', type='string', default=None,
-                    help="Save the results to a file")
+                    help="Save the results to a file. Needs to start with 'xml:'")
   return parser
 
 
@@ -859,8 +859,10 @@ def main():
   tasks = find_tests(binaries, additional_args, options, times)
   gtest_output_files = []
   if options.gtest_output:
+    if options.repeat != 1:
+      parser.error("gtest_output only works with repeat times 1")
     if not options.gtest_output.startswith("xml:"):
-      raise Exception("only xml is supported as gtest_output format")
+      parser.error("only xml is supported as gtest_output format")
     for task in tasks:
       (gtest_output_handle, gtest_output_file) = tempfile.mkstemp(prefix='gtest_parallel_out_',
                                                 suffix=".xml")
