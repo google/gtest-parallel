@@ -54,6 +54,7 @@ else:
 # or a subprocess, including the one the current call is waiting for),
 # wait(p) will call p.terminate() and raise ProcessWasInterrupted.
 class SigintHandler(object):
+
   class ProcessWasInterrupted(Exception):
     pass
 
@@ -124,6 +125,7 @@ def term_width(out):
 # use this to ensure that lots of unimportant info (tests passing)
 # won't drown out important info (tests failing).
 class Outputter(object):
+
   def __init__(self, out_file):
     self.__out_file = out_file
     self.__previous_line_was_transient = False
@@ -319,6 +321,7 @@ class TaskManager(object):
 
 
 class FilterFormat(object):
+
   def __init__(self, output_dir):
     if sys.stdout.isatty():
       # stdout needs to be unbuffered since the output is interactive.
@@ -438,6 +441,7 @@ class FilterFormat(object):
 
 
 class CollectTestResults(object):
+
   def __init__(self, json_dump_filepath):
     self.test_results_lock = threading.Lock()
     self.json_dump_file = open(json_dump_filepath, 'w')
@@ -485,7 +489,9 @@ class CollectTestResults(object):
 
 # Record of test runtimes. Has built-in locking.
 class TestTimes(object):
+
   class LockedFile(object):
+
     def __init__(self, filename, mode):
       self._filename = filename
       self._mode = mode
@@ -650,7 +656,8 @@ def find_tests(binaries, additional_args, options, times):
       if options.failed and last_execution_time is not None:
         continue
 
-      test_command = command + ['--gtest_filter=' + test_name]
+      test_command = [a.replace('{#}', f"{test_count}")
+                      for a in command] + ['--gtest_filter=' + test_name]
       if (test_count - options.shard_index) % options.shard_count == 0:
         for execution_number in range(options.repeat):
           tasks.append(
@@ -666,7 +673,9 @@ def find_tests(binaries, additional_args, options, times):
 
 def execute_tasks(tasks, pool_size, task_manager, timeout_seconds,
                   serialize_test_cases):
+
   class WorkerFn(object):
+
     def __init__(self, tasks, running_groups):
       self.tasks = tasks
       self.running_groups = running_groups
