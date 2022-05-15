@@ -270,7 +270,7 @@ class TaskManager(object):
     self.times.record_test_time(task.test_binary, task.test_name,
                                 task.last_execution_time)
     if self.test_results:
-      self.test_results.log(task.test_name, int(task.runtime_ms / 1000),
+      self.test_results.log(task.test_name, task.runtime_ms / 1000,
                             "PASS" if task.exit_code == 0 else "FAIL")
 
     with self.lock:
