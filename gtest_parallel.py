@@ -270,7 +270,7 @@ class TaskManager(object):
     self.times.record_test_time(task.test_binary, task.test_name,
                                 task.last_execution_time)
     if self.test_results:
-      self.test_results.log(task.test_name, task.runtime_ms,
+      self.test_results.log(task.test_name, task.runtime_ms / 1000.0,
                             "PASS" if task.exit_code == 0 else "FAIL")
 
     with self.lock:
@@ -431,7 +431,7 @@ class CollectTestResults(object):
         "tests": {},
     }
 
-  def log(self, test, runtime_ms, actual_result):
+  def log(self, test, runtime_seconds, actual_result):
     with self.test_results_lock:
       self.test_results['num_failures_by_type'][actual_result] += 1
       results = self.test_results['tests']
@@ -440,11 +440,11 @@ class CollectTestResults(object):
 
       if results:
         results['actual'] += ' ' + actual_result
-        results['times'].append(runtime_ms)
+        results['times'].append(runtime_seconds)
       else:  # This is the first invocation of the test
         results['actual'] = actual_result
-        results['times'] = [runtime_ms]
-        results['time'] = runtime_ms
+        results['times'] = [runtime_seconds]
+        results['time'] = runtime_seconds
         results['expected'] = 'PASS'
 
   def dump_to_file_and_close(self):
