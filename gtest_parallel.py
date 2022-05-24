@@ -29,12 +29,12 @@ import threading
 import time
 
 if sys.version_info.major >= 3:
-    long = int
-    import _pickle as cPickle
-    import _thread as thread
+  long = int
+  import _pickle as cPickle
+  import _thread as thread
 else:
-    import cPickle
-    import thread
+  import cPickle
+  import thread
 
 from pickle import HIGHEST_PROTOCOL as PICKLE_HIGHEST_PROTOCOL
 
@@ -54,15 +54,20 @@ else:
 # or a subprocess, including the one the current call is waiting for),
 # wait(p) will call p.terminate() and raise ProcessWasInterrupted.
 class SigintHandler(object):
-  class ProcessWasInterrupted(Exception): pass
-  sigint_returncodes = {-signal.SIGINT,  # Unix
-                        -1073741510,     # Windows
-                        }
+  class ProcessWasInterrupted(Exception):
+    pass
+
+  sigint_returncodes = {
+      -signal.SIGINT,  # Unix
+      -1073741510,  # Windows
+  }
+
   def __init__(self):
     self.__lock = threading.Lock()
     self.__processes = set()
     self.__got_sigint = False
     signal.signal(signal.SIGINT, lambda signal_num, frame: self.interrupt())
+
   def __on_sigint(self):
     self.__got_sigint = True
     while self.__processes:
@@ -70,12 +75,15 @@ class SigintHandler(object):
         self.__processes.pop().terminate()
       except OSError:
         pass
+
   def interrupt(self):
     with self.__lock:
       self.__on_sigint()
+
   def got_sigint(self):
     with self.__lock:
       return self.__got_sigint
+
   def wait(self, p):
     with self.__lock:
       if self.__got_sigint:
@@ -89,6 +97,8 @@ class SigintHandler(object):
       if self.__got_sigint:
         raise self.ProcessWasInterrupted
     return code
+
+
 sigint_handler = SigintHandler()
 
 
@@ -99,7 +109,8 @@ def term_width(out):
     return None
   try:
     p = subprocess.Popen(["stty", "size"],
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
     (out, err) = p.communicate()
     if p.returncode != 0 or err:
       return None
@@ -117,6 +128,7 @@ class Outputter(object):
     self.__out_file = out_file
     self.__previous_line_was_transient = False
     self.__width = term_width(out_file)  # Line width, or None if not a tty.
+
   def transient_line(self, msg):
     if self.__width is None:
       self.__out_file.write(msg + "\n")
@@ -124,10 +136,12 @@ class Outputter(object):
     else:
       self.__out_file.write("\r" + msg[:self.__width].ljust(self.__width))
       self.__previous_line_was_transient = True
+
   def flush_transient_output(self):
     if self.__previous_line_was_transient:
       self.__out_file.write("\n")
       self.__previous_line_was_transient = False
+
   def permanent_line(self, msg):
     self.flush_transient_output()
     self.__out_file.write(msg + "\n")
@@ -138,8 +152,8 @@ class Outputter(object):
 def get_save_file_path():
   """Return path to file for saving transient data."""
   if sys.platform == 'win32':
-    default_cache_path = os.path.join(os.path.expanduser('~'),
-                                      'AppData', 'Local')
+    default_cache_path = os.path.join(os.path.expanduser('~'), 'AppData',
+                                      'Local')
     cache_path = os.environ.get('LOCALAPPDATA', default_cache_path)
   else:
     # We don't use xdg module since it's not a standard.
@@ -164,6 +178,7 @@ class Task(object):
   Additionaly we store the last execution time, so that next time the test is
   executed, the slowest tests are run first.
   """
+
   def __init__(self, test_binary, test_name, test_command, execution_number,
                last_execution_time, output_dir):
     self.test_name = test_name
@@ -179,8 +194,8 @@ class Task(object):
     self.test_id = (test_binary, test_name)
     self.task_id = (test_binary, test_name, self.execution_number)
 
-    self.log_file = Task._logname(self.output_dir, self.test_binary,
-                                  test_name, self.execution_number)
+    self.log_file = Task._logname(self.output_dir, self.test_binary, test_name,
+                                  self.execution_number)
 
   def __sorting_key(self):
     # Unseen or failing tests (both missing execution time) take precedence over
@@ -190,13 +205,13 @@ class Task(object):
             self.last_execution_time)
 
   def __eq__(self, other):
-      return self.__sorting_key() == other.__sorting_key()
+    return self.__sorting_key() == other.__sorting_key()
 
   def __ne__(self, other):
-      return not (self == other)
+    return not (self == other)
 
   def __lt__(self, other):
-      return self.__sorting_key() < other.__sorting_key()
+    return self.__sorting_key() < other.__sorting_key()
 
   @staticmethod
   def _normalize(string):
@@ -236,6 +251,7 @@ class TaskManager(object):
   Logger, TestResults and TestTimes classes, and in case of failure, retries the
   test as specified by the --retry_failed flag.
   """
+
   def __init__(self, times, logger, test_results, task_factory, times_to_retry,
                initial_execution_number):
     self.times = times
@@ -338,23 +354,24 @@ class FilterFormat(object):
       runtime_ms = 'Interrupted'
       if task.runtime_ms is not None:
         runtime_ms = '%d ms' % task.runtime_ms
-      self.out.permanent_line("%11s: %s %s%s" % (
-          runtime_ms, task.test_binary, task.test_name,
-          (" (try #%d)" % task.execution_number) if print_try_number else ""))
+      self.out.permanent_line(
+          "%11s: %s %s%s" %
+          (runtime_ms, task.test_binary, task.test_name,
+           (" (try #%d)" % task.execution_number) if print_try_number else ""))
 
   def log_exit(self, task):
     with self.stdout_lock:
       self.finished_tasks += 1
-      self.out.transient_line("[%d/%d] %s (%d ms)"
-                              % (self.finished_tasks, self.total_tasks,
-                                 task.test_name, task.runtime_ms))
+      self.out.transient_line("[%d/%d] %s (%d ms)" %
+                              (self.finished_tasks, self.total_tasks,
+                               task.test_name, task.runtime_ms))
       if task.exit_code != 0:
         with open(task.log_file) as f:
           for line in f.readlines():
             self.out.permanent_line(line.rstrip())
         self.out.permanent_line(
-          "[%d/%d] %s returned/aborted with exit code %d (%d ms)"
-          % (self.finished_tasks, self.total_tasks, task.test_name,
+            "[%d/%d] %s returned/aborted with exit code %d (%d ms)" %
+            (self.finished_tasks, self.total_tasks, task.test_name,
              task.exit_code, task.runtime_ms))
 
     if self.output_dir is None:
@@ -370,7 +387,8 @@ class FilterFormat(object):
         except OSError as e:
           if e.errno is not errno.ENOENT:
             if i is num_tries - 1:
-              self.out.permanent_line('Could not remove temporary log file: ' + str(e))
+              self.out.permanent_line('Could not remove temporary log file: ' +
+                                      str(e))
             else:
               time.sleep(0.1)
             continue
@@ -382,6 +400,7 @@ class FilterFormat(object):
 
   def summarize(self, passed_tasks, failed_tasks, interrupted_tasks):
     stats = {}
+
     def add_stats(stats, task, idx):
       task_key = (task.test_binary, task.test_name)
       if not task_key in stats:
@@ -404,10 +423,10 @@ class FilterFormat(object):
       total_runs = num_passed + num_failed + num_interrupted
       if num_passed == total_runs:
         continue
-      self.out.permanent_line(
-          "  %s %s passed %d / %d times%s." %
-              (test_binary, task_name, num_passed, total_runs,
-               "" if num_interrupted == 0 else (" (%d interrupted)" % num_interrupted)))
+      self.out.permanent_line("  %s %s passed %d / %d times%s." %
+                              (test_binary, task_name, num_passed, total_runs,
+                               "" if num_interrupted == 0 else
+                               (" (%d interrupted)" % num_interrupted)))
 
   def flush(self):
     self.out.flush_transient_output()
@@ -587,10 +606,10 @@ def find_tests(binaries, additional_args, options, times):
       sys.exit("%s: %s\n%s" % (test_binary, str(e), e.output))
 
     try:
-        test_list = test_list.split('\n')
+      test_list = test_list.split('\n')
     except TypeError:
-        # subprocess.check_output() returns bytes in python3
-        test_list = test_list.decode(sys.stdout.encoding).split('\n')
+      # subprocess.check_output() returns bytes in python3
+      test_list = test_list.decode(sys.stdout.encoding).split('\n')
 
     command += ['--gtest_color=' + options.gtest_color]
 
@@ -612,7 +631,7 @@ def find_tests(binaries, additional_args, options, times):
         continue
 
       # Skip PRE_ tests which are used by Chromium.
-      if '.PRE_' in test_name :
+      if '.PRE_' in test_name:
         continue
 
       last_execution_time = times.get_test_time(test_binary, test_name)
@@ -622,9 +641,9 @@ def find_tests(binaries, additional_args, options, times):
       test_command = command + ['--gtest_filter=' + test_name]
       if (test_count - options.shard_index) % options.shard_count == 0:
         for execution_number in range(options.repeat):
-          tasks.append(Task(test_binary, test_name, test_command,
-                            execution_number + 1, last_execution_time,
-                            options.output_dir))
+          tasks.append(
+              Task(test_binary, test_name, test_command, execution_number + 1,
+                   last_execution_time, options.output_dir))
 
       test_count += 1
 
@@ -633,8 +652,8 @@ def find_tests(binaries, additional_args, options, times):
   return sorted(tasks, reverse=True)
 
 
-def execute_tasks(tasks, pool_size, task_manager,
-                  timeout, serialize_test_cases):
+def execute_tasks(tasks, pool_size, task_manager, timeout,
+                  serialize_test_cases):
   class WorkerFn(object):
     def __init__(self, tasks, running_groups):
       self.tasks = tasks
@@ -689,46 +708,78 @@ def execute_tasks(tasks, pool_size, task_manager,
 
 def default_options_parser():
   parser = optparse.OptionParser(
-      usage = 'usage: %prog [options] binary [binary ...] -- [additional args]')
+      usage='usage: %prog [options] binary [binary ...] -- [additional args]')
 
-  parser.add_option('-d', '--output_dir', type='string', default=None,
+  parser.add_option('-d',
+                    '--output_dir',
+                    type='string',
+                    default=None,
                     help='Output directory for test logs. Logs will be '
-                         'available under gtest-parallel-logs/, so '
-                         '--output_dir=/tmp will results in all logs being '
-                         'available under /tmp/gtest-parallel-logs/.')
-  parser.add_option('-r', '--repeat', type='int', default=1,
+                    'available under gtest-parallel-logs/, so '
+                    '--output_dir=/tmp will results in all logs being '
+                    'available under /tmp/gtest-parallel-logs/.')
+  parser.add_option('-r',
+                    '--repeat',
+                    type='int',
+                    default=1,
                     help='Number of times to execute all the tests.')
-  parser.add_option('--retry_failed', type='int', default=0,
+  parser.add_option('--retry_failed',
+                    type='int',
+                    default=0,
                     help='Number of times to repeat failed tests.')
-  parser.add_option('--failed', action='store_true', default=False,
+  parser.add_option('--failed',
+                    action='store_true',
+                    default=False,
                     help='run only failed and new tests')
-  parser.add_option('-w', '--workers', type='int',
+  parser.add_option('-w',
+                    '--workers',
+                    type='int',
                     default=multiprocessing.cpu_count(),
                     help='number of workers to spawn')
-  parser.add_option('--gtest_color', type='string', default='yes',
+  parser.add_option('--gtest_color',
+                    type='string',
+                    default='yes',
                     help='color output')
-  parser.add_option('--gtest_filter', type='string', default='',
+  parser.add_option('--gtest_filter',
+                    type='string',
+                    default='',
                     help='test filter')
-  parser.add_option('--gtest_also_run_disabled_tests', action='store_true',
-                    default=False, help='run disabled tests too')
-  parser.add_option('--print_test_times', action='store_true', default=False,
-                    help='list the run time of each test at the end of execution')
-  parser.add_option('--shard_count', type='int', default=1,
+  parser.add_option('--gtest_also_run_disabled_tests',
+                    action='store_true',
+                    default=False,
+                    help='run disabled tests too')
+  parser.add_option(
+      '--print_test_times',
+      action='store_true',
+      default=False,
+      help='list the run time of each test at the end of execution')
+  parser.add_option('--shard_count',
+                    type='int',
+                    default=1,
                     help='total number of shards (for sharding test execution '
-                         'between multiple machines)')
-  parser.add_option('--shard_index', type='int', default=0,
+                    'between multiple machines)')
+  parser.add_option('--shard_index',
+                    type='int',
+                    default=0,
                     help='zero-indexed number identifying this shard (for '
-                         'sharding test execution between multiple machines)')
-  parser.add_option('--dump_json_test_results', type='string', default=None,
-                    help='Saves the results of the tests as a JSON machine-'
-                         'readable file. The format of the file is specified at '
-                         'https://www.chromium.org/developers/the-json-test-results-format')
-  parser.add_option('--timeout', type='int', default=None,
+                    'sharding test execution between multiple machines)')
+  parser.add_option(
+      '--dump_json_test_results',
+      type='string',
+      default=None,
+      help='Saves the results of the tests as a JSON machine-'
+      'readable file. The format of the file is specified at '
+      'https://www.chromium.org/developers/the-json-test-results-format')
+  parser.add_option('--timeout',
+                    type='int',
+                    default=None,
                     help='Interrupt all remaining processes after the given '
-                         'time (in seconds).')
-  parser.add_option('--serialize_test_cases', action='store_true',
-                    default=False, help='Do not run tests from the same test '
-                                        'case in parallel.')
+                    'time (in seconds).')
+  parser.add_option('--serialize_test_cases',
+                    action='store_true',
+                    default=False,
+                    help='Do not run tests from the same test '
+                    'case in parallel.')
   return parser
 
 
@@ -738,15 +789,14 @@ def main():
 
   for i in range(len(sys.argv)):
     if sys.argv[i] == '--':
-      additional_args = sys.argv[i+1:]
+      additional_args = sys.argv[i + 1:]
       sys.argv = sys.argv[:i]
       break
 
   parser = default_options_parser()
   (options, binaries) = parser.parse_args()
 
-  if (options.output_dir is not None and
-      not os.path.isdir(options.output_dir)):
+  if (options.output_dir is not None and not os.path.isdir(options.output_dir)):
     parser.error('--output_dir value must be an existing directory, '
                  'current value is "%s"' % options.output_dir)
 
@@ -755,8 +805,7 @@ def main():
   # user specifies --output_dir=Docs/, we'll create Docs/gtest-parallel-logs
   # and clean that directory out on startup, instead of nuking Docs/.
   if options.output_dir:
-    options.output_dir = os.path.join(options.output_dir,
-                                      'gtest-parallel-logs')
+    options.output_dir = os.path.join(options.output_dir, 'gtest-parallel-logs')
 
   if binaries == []:
     parser.print_usage()
@@ -807,8 +856,8 @@ def main():
 
   tasks = find_tests(binaries, additional_args, options, times)
   logger.log_tasks(len(tasks))
-  execute_tasks(tasks, options.workers, task_manager,
-                timeout, options.serialize_test_cases)
+  execute_tasks(tasks, options.workers, task_manager, timeout,
+                options.serialize_test_cases)
 
   print_try_number = options.retry_failed > 0 or options.repeat > 1
   if task_manager.passed:
@@ -821,8 +870,8 @@ def main():
     logger.move_to('failed', task_manager.failed)
 
   if task_manager.started:
-    logger.print_tests(
-        'INTERRUPTED TESTS', task_manager.started.values(), print_try_number)
+    logger.print_tests('INTERRUPTED TESTS', task_manager.started.values(),
+                       print_try_number)
     logger.move_to('interrupted', task_manager.started.values())
 
   if options.repeat > 1 and (task_manager.failed or task_manager.started):
@@ -838,6 +887,7 @@ def main():
     return -signal.SIGINT
 
   return task_manager.global_exit_code
+
 
 if __name__ == "__main__":
   sys.exit(main())
