@@ -54,8 +54,8 @@ class TestTimesMock(object):
 
   def get_test_time(self, test_binary, test_name):
     test_group, test = test_name.split('.')
-    return self.test_data.get(
-        test_binary, {}).get(test_group, {}).get(test, None)
+    return self.test_data.get(test_binary, {}).get(test_group,
+                                                   {}).get(test, None)
 
   def assertRecorded(self, test_id, expected, retries):
     self.test_lib.assertIn(test_id, self.last_execution_times)
