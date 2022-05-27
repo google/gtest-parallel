@@ -281,13 +281,13 @@ class TaskManager(object):
     with self.lock:
       self.started[task.task_id] = task
 
-  def __register_exit(self, task):
+  def register_exit(self, task):
     self.logger.log_exit(task)
     self.times.record_test_time(task.test_binary, task.test_name,
                                 task.last_execution_time)
     if self.test_results:
       self.test_results.log(task.test_name, task.runtime_ms / 1000.0,
-                            "PASS" if task.exit_code == 0 else "FAIL")
+                            task.exit_code)
 
     with self.lock:
       self.started.pop(task.task_id)
@@ -300,7 +300,7 @@ class TaskManager(object):
     for try_number in range(self.times_to_retry + 1):
       self.__register_start(task)
       task.run()
-      self.__register_exit(task)
+      self.register_exit(task)
 
       if task.exit_code == 0:
         break
@@ -369,10 +369,15 @@ class FilterFormat(object):
         with open(task.log_file) as f:
           for line in f.readlines():
             self.out.permanent_line(line.rstrip())
-        self.out.permanent_line(
-            "[%d/%d] %s returned/aborted with exit code %d (%d ms)" %
-            (self.finished_tasks, self.total_tasks, task.test_name,
-             task.exit_code, task.runtime_ms))
+        if task.exit_code is None:
+          self.out.permanent_line("[%d/%d] %s aborted after %d ms" %
+                                  (self.finished_tasks, self.total_tasks,
+                                   task.test_name, task.runtime_ms))
+        else:
+          self.out.permanent_line(
+              "[%d/%d] %s returned with exit code %d (%d ms)" %
+              (self.finished_tasks, self.total_tasks, task.test_name,
+               task.exit_code, task.runtime_ms))
 
     if self.output_dir is None:
       # Try to remove the file 100 times (sleeping for 0.1 second in between).
@@ -446,11 +451,18 @@ class CollectTestResults(object):
         "num_failures_by_type": {
             "PASS": 0,
             "FAIL": 0,
+            "TIMEOUT": 0,
         },
         "tests": {},
     }
 
-  def log(self, test, runtime_seconds, actual_result):
+  def log(self, test, runtime_seconds, exit_code):
+    if exit_code is None:
+      actual_result = "TIMEOUT"
+    elif exit_code == 0:
+      actual_result = "PASS"
+    else:
+      actual_result = "FAIL"
     with self.test_results_lock:
       self.test_results['num_failures_by_type'][actual_result] += 1
       results = self.test_results['tests']
@@ -652,7 +664,7 @@ def find_tests(binaries, additional_args, options, times):
   return sorted(tasks, reverse=True)
 
 
-def execute_tasks(tasks, pool_size, task_manager, timeout,
+def execute_tasks(tasks, pool_size, task_manager, timeout_seconds,
                   serialize_test_cases):
   class WorkerFn(object):
     def __init__(self, tasks, running_groups):
@@ -693,8 +705,10 @@ def execute_tasks(tasks, pool_size, task_manager, timeout,
     t.start()
     return t
 
+  timeout = None
   try:
-    if timeout:
+    if timeout_seconds:
+      timeout = threading.Timer(timeout_seconds, sigint_handler.interrupt)
       timeout.start()
     running_groups = set() if serialize_test_cases else None
     worker_fn = WorkerFn(tasks, running_groups)
@@ -704,6 +718,9 @@ def execute_tasks(tasks, pool_size, task_manager, timeout,
   finally:
     if timeout:
       timeout.cancel()
+      for task in list(task_manager.started.values()):
+        task.runtime_ms = timeout_seconds * 1000
+        task_manager.register_exit(task)
 
 
 def default_options_parser():
@@ -838,10 +855,6 @@ def main():
       if e.errno != errno.EEXIST or not os.path.isdir(options.output_dir):
         raise e
 
-  timeout = None
-  if options.timeout is not None:
-    timeout = threading.Timer(options.timeout, sigint_handler.interrupt)
-
   test_results = None
   if options.dump_json_test_results is not None:
     test_results = CollectTestResults(options.dump_json_test_results)
@@ -856,7 +869,7 @@ def main():
 
   tasks = find_tests(binaries, additional_args, options, times)
   logger.log_tasks(len(tasks))
-  execute_tasks(tasks, options.workers, task_manager, timeout,
+  execute_tasks(tasks, options.workers, task_manager, options.timeout,
                 options.serialize_test_cases)
 
   print_try_number = options.retry_failed > 0 or options.repeat > 1

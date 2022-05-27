@@ -321,6 +321,21 @@ class TestTestTimes(unittest.TestCase):
           worker.join()
 
 
+class TestTimeoutTestCases(unittest.TestCase):
+  def test_task_timeout(self):
+    timeout = 1
+    task = gtest_parallel.Task('test_binary', 'test_name', ['test_command'], 1,
+                               None, 'output_dir')
+    tasks = [task]
+
+    task_manager = TaskManagerMock()
+    gtest_parallel.execute_tasks(tasks, 1, task_manager, timeout, True)
+
+    self.assertEqual(1, task_manager.total_tasks_run)
+    self.assertEqual(None, task.exit_code)
+    self.assertEqual(1000, task.runtime_ms)
+
+
 class TestTask(unittest.TestCase):
   def test_log_file_names(self):
     def root():
@@ -414,6 +429,9 @@ class TestFilterFormat(unittest.TestCase):
         return False
 
       def write(*args):
+        pass
+
+      def flush(*args):
         pass
 
     with guard_temp_dir() as temp_dir, \
