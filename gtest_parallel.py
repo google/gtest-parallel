@@ -440,6 +440,8 @@ def join_gtest_output_files(files, output_filename):
   '''join given files into a single one'''
   from xml.dom import minidom
 
+  files = [f for f in files if os.path.exists(f) and os.path.getsize(f) > 0]
+
   base_file = files[0]
   del files[0]
   doc = minidom.parse(base_file)
