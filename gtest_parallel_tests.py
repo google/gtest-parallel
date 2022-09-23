@@ -40,6 +40,7 @@ def guard_temp_dir():
   finally:
     shutil.rmtree(temp_dir)
 
+
 @contextlib.contextmanager
 def guard_temp_subdir(temp_dir, *path):
   assert path, 'Path should not be empty'
@@ -50,6 +51,7 @@ def guard_temp_subdir(temp_dir, *path):
     yield temp_subdir
   finally:
     shutil.rmtree(os.path.join(temp_dir, path[0]))
+
 
 @contextlib.contextmanager
 def guard_patch_module(import_name, new_val):
@@ -70,30 +72,28 @@ def guard_patch_module(import_name, new_val):
 
 class TestTaskManager(unittest.TestCase):
   def setUp(self):
-    self.passing_task = (
-        ('fake_binary', 'Fake.PassingTest'), {
-            'runtime_ms': [10],
-            'exit_code': [0],
-            'last_execution_time': [10],
-        })
-    self.failing_task = (
-        ('fake_binary', 'Fake.FailingTest'), {
-            'runtime_ms': [20, 30, 40],
-            'exit_code': [1, 1, 1],
-            'last_execution_time': [None, None, None],
-        })
-    self.fails_once_then_succeeds = (
-        ('another_binary', 'Fake.Test.FailOnce'), {
-            'runtime_ms': [21, 22],
-            'exit_code': [1, 0],
-            'last_execution_time': [None, 22],
-        })
-    self.fails_twice_then_succeeds = (
-        ('yet_another_binary', 'Fake.Test.FailTwice'), {
-            'runtime_ms': [23, 25, 24],
-            'exit_code': [1, 1, 0],
-            'last_execution_time': [None, None, 24],
-        })
+    self.passing_task = (('fake_binary', 'Fake.PassingTest'), {
+        'runtime_ms': [10],
+        'exit_code': [0],
+        'last_execution_time': [10],
+    })
+    self.failing_task = (('fake_binary', 'Fake.FailingTest'), {
+        'runtime_ms': [20, 30, 40],
+        'exit_code': [1, 1, 1],
+        'last_execution_time': [None, None, None],
+    })
+    self.fails_once_then_succeeds = (('another_binary', 'Fake.Test.FailOnce'), {
+        'runtime_ms': [21, 22],
+        'exit_code': [1, 0],
+        'last_execution_time': [None, 22],
+    })
+    self.fails_twice_then_succeeds = (('yet_another_binary',
+                                       'Fake.Test.FailTwice'), {
+                                           'runtime_ms': [23, 25, 24],
+                                           'exit_code': [1, 1, 0],
+                                           'last_execution_time':
+                                           [None, None, 24],
+                                       })
 
   def execute_tasks(self, tasks, retries, expected_exit_code):
     repeat = 1
@@ -103,8 +103,9 @@ class TestTaskManager(unittest.TestCase):
     test_results = TestResultsMock(self)
 
     task_mock_factory = TaskMockFactory(dict(tasks))
-    task_manager = gtest_parallel.TaskManager(
-        times, logger, test_results, task_mock_factory, retries, repeat)
+    task_manager = gtest_parallel.TaskManager(times, logger, test_results,
+                                              task_mock_factory, retries,
+                                              repeat)
 
     for test_id, expected in tasks:
       task = task_mock_factory.get_task(test_id)
@@ -126,46 +127,55 @@ class TestTaskManager(unittest.TestCase):
     self.assertEqual(task_manager.global_exit_code, expected_exit_code)
 
   def test_passing_task_succeeds(self):
-    self.execute_tasks(tasks=[self.passing_task], retries=0,
+    self.execute_tasks(tasks=[self.passing_task],
+                       retries=0,
                        expected_exit_code=0)
 
   def test_failing_task_fails(self):
-    self.execute_tasks(tasks=[self.failing_task], retries=0,
+    self.execute_tasks(tasks=[self.failing_task],
+                       retries=0,
                        expected_exit_code=1)
 
   def test_failing_task_fails_even_with_retries(self):
-    self.execute_tasks(tasks=[self.failing_task], retries=2,
+    self.execute_tasks(tasks=[self.failing_task],
+                       retries=2,
                        expected_exit_code=1)
 
   def test_executing_passing_and_failing_fails(self):
     # Executing both a faling test and a passing one should make gtest-parallel
     # fail, no matter if the failing task is run first or last.
     self.execute_tasks(tasks=[self.failing_task, self.passing_task],
-                       retries=2, expected_exit_code=1)
+                       retries=2,
+                       expected_exit_code=1)
 
     self.execute_tasks(tasks=[self.passing_task, self.failing_task],
-                       retries=2, expected_exit_code=1)
+                       retries=2,
+                       expected_exit_code=1)
 
   def test_task_succeeds_with_one_retry(self):
     # Executes test and retries once. The first run should fail and the second
     # succeed, so gtest-parallel should succeed.
     self.execute_tasks(tasks=[self.fails_once_then_succeeds],
-                       retries=1, expected_exit_code=0)
+                       retries=1,
+                       expected_exit_code=0)
 
   def test_task_fails_with_one_retry(self):
     # Executes test and retries once, not enough for the test to start passing,
     # so gtest-parallel should return an error.
     self.execute_tasks(tasks=[self.fails_twice_then_succeeds],
-                       retries=1, expected_exit_code=1)
+                       retries=1,
+                       expected_exit_code=1)
 
   def test_runner_succeeds_when_all_tasks_eventually_succeeds(self):
     # Executes the test and retries twice. One test should pass in the first
     # attempt, another should take two runs, and the last one should take three
     # runs. All tests should succeed, so gtest-parallel should succeed too.
-    self.execute_tasks(tasks=[self.passing_task,
-                              self.fails_once_then_succeeds,
-                              self.fails_twice_then_succeeds],
-                       retries=2, expected_exit_code=0)
+    self.execute_tasks(tasks=[
+        self.passing_task, self.fails_once_then_succeeds,
+        self.fails_twice_then_succeeds
+    ],
+                       retries=2,
+                       expected_exit_code=0)
 
 
 class TestSaveFilePath(unittest.TestCase):
@@ -200,9 +210,9 @@ class TestSaveFilePath(unittest.TestCase):
         guard_patch_module('sys.platform', 'win32'):
       with guard_patch_module('os.environ', {}), \
           guard_temp_subdir(temp_dir, 'AppData', 'Local'):
-        self.assertEqual(os.path.join(temp_dir, 'AppData',
-                                      'Local', 'gtest-parallel'),
-                         gtest_parallel.get_save_file_path())
+        self.assertEqual(
+            os.path.join(temp_dir, 'AppData', 'Local', 'gtest-parallel'),
+            gtest_parallel.get_save_file_path())
 
       with guard_patch_module('os.environ', {'LOCALAPPDATA': temp_dir}):
         self.assertEqual(os.path.join(temp_dir, 'gtest-parallel'),
@@ -216,9 +226,8 @@ class TestSaveFilePath(unittest.TestCase):
 
 class TestSerializeTestCases(unittest.TestCase):
   def _execute_tasks(self, max_number_of_test_cases,
-                     max_number_of_tests_per_test_case,
-                     max_number_of_repeats, max_number_of_workers,
-                     serialize_test_cases):
+                     max_number_of_tests_per_test_case, max_number_of_repeats,
+                     max_number_of_workers, serialize_test_cases):
     tasks = []
     for test_case in range(max_number_of_test_cases):
       for test_name in range(max_number_of_tests_per_test_case):
@@ -226,16 +235,17 @@ class TestSerializeTestCases(unittest.TestCase):
         test_name = 'TestCase{}.test{}'.format(test_case, test_name)
 
         for execution_number in range(random.randint(1, max_number_of_repeats)):
-          tasks.append(gtest_parallel.Task(
-            'path/to/binary', test_name, ['path/to/binary', '--gtest_filter=*'],
-            execution_number + 1, None, 'path/to/output'))
+          tasks.append(
+              gtest_parallel.Task('path/to/binary', test_name,
+                                  ['path/to/binary', '--gtest_filter=*'],
+                                  execution_number + 1, None, 'path/to/output'))
 
     expected_tasks_number = len(tasks)
 
     task_manager = TaskManagerMock()
 
-    gtest_parallel.execute_tasks(tasks, max_number_of_workers,
-                                 task_manager, None, serialize_test_cases)
+    gtest_parallel.execute_tasks(tasks, max_number_of_workers, task_manager,
+                                 None, serialize_test_cases)
 
     self.assertEqual(serialize_test_cases,
                      not task_manager.had_running_parallel_groups)
@@ -278,8 +288,9 @@ class TestTestTimes(unittest.TestCase):
           times = gtest_parallel.TestTimes(save_file)
 
           threads_test_times = [
-            binary for (binary, _) in times._TestTimes__times.keys()
-            if binary.startswith(path_to_binary)]
+              binary for (binary, _) in times._TestTimes__times.keys()
+              if binary.startswith(path_to_binary)
+          ]
 
           self.assertEqual(cnt, len(threads_test_times))
 
@@ -289,12 +300,11 @@ class TestTestTimes(unittest.TestCase):
           times.write_to_file(save_file)
 
         self.assertEqual(
-          1000,
-          times.get_test_time('{}-{}'.format(path_to_binary, cnt),
-                              'TestFoo.testBar'))
+            1000,
+            times.get_test_time('{}-{}'.format(path_to_binary, cnt),
+                                'TestFoo.testBar'))
         self.assertIsNone(
-          times.get_test_time('{}-{}'.format(path_to_binary, cnt),
-                              'baz'))
+            times.get_test_time('{}-{}'.format(path_to_binary, cnt), 'baz'))
 
       t = threading.Thread(target=test_times_worker)
       t.start()
@@ -302,11 +312,28 @@ class TestTestTimes(unittest.TestCase):
 
     with guard_temp_dir() as temp_dir:
       try:
-        workers = [start_worker(os.path.join(temp_dir, test_times_file_name))
-                   for _ in range(max_number_of_workers)]
+        workers = [
+            start_worker(os.path.join(temp_dir, test_times_file_name))
+            for _ in range(max_number_of_workers)
+        ]
       finally:
         for worker in workers:
           worker.join()
+
+
+class TestTimeoutTestCases(unittest.TestCase):
+  def test_task_timeout(self):
+    timeout = 1
+    task = gtest_parallel.Task('test_binary', 'test_name', ['test_command'], 1,
+                               None, 'output_dir')
+    tasks = [task]
+
+    task_manager = TaskManagerMock()
+    gtest_parallel.execute_tasks(tasks, 1, task_manager, timeout, True)
+
+    self.assertEqual(1, task_manager.total_tasks_run)
+    self.assertEqual(None, task.exit_code)
+    self.assertEqual(1000, task.runtime_ms)
 
 
 class TestTask(unittest.TestCase):
@@ -314,33 +341,32 @@ class TestTask(unittest.TestCase):
     def root():
       return 'C:\\' if sys.platform == 'win32' else '/'
 
-    self.assertEqual(
-      os.path.join('.', 'bin-Test_case-100.log'),
-      gtest_parallel.Task._logname('.', 'bin', 'Test.case', 100))
+    self.assertEqual(os.path.join('.', 'bin-Test_case-100.log'),
+                     gtest_parallel.Task._logname('.', 'bin', 'Test.case', 100))
 
     self.assertEqual(
-      os.path.join('..', 'a', 'b', 'bin-Test_case_2-1.log'),
-      gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
-                                   os.path.join('..', 'bin'),
-                                   'Test.case/2', 1))
+        os.path.join('..', 'a', 'b', 'bin-Test_case_2-1.log'),
+        gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
+                                     os.path.join('..', 'bin'), 'Test.case/2',
+                                     1))
 
     self.assertEqual(
-      os.path.join('..', 'a', 'b', 'bin-Test_case_2-5.log'),
-      gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
-                                   os.path.join(root(), 'c', 'd', 'bin'),
-                                   'Test.case/2', 5))
+        os.path.join('..', 'a', 'b', 'bin-Test_case_2-5.log'),
+        gtest_parallel.Task._logname(os.path.join('..', 'a', 'b'),
+                                     os.path.join(root(), 'c', 'd', 'bin'),
+                                     'Test.case/2', 5))
 
     self.assertEqual(
-      os.path.join(root(), 'a', 'b', 'bin-Instantiation_Test_case_2-3.log'),
-      gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
-                                   os.path.join('..', 'c', 'bin'),
-                                   'Instantiation/Test.case/2', 3))
+        os.path.join(root(), 'a', 'b', 'bin-Instantiation_Test_case_2-3.log'),
+        gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
+                                     os.path.join('..', 'c', 'bin'),
+                                     'Instantiation/Test.case/2', 3))
 
     self.assertEqual(
-      os.path.join(root(), 'a', 'b', 'bin-Test_case-1.log'),
-      gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
-                                   os.path.join(root(), 'c', 'd', 'bin'),
-                                   'Test.case', 1))
+        os.path.join(root(), 'a', 'b', 'bin-Test_case-1.log'),
+        gtest_parallel.Task._logname(os.path.join(root(), 'a', 'b'),
+                                     os.path.join(root(), 'c', 'd', 'bin'),
+                                     'Test.case', 1))
 
   def test_logs_to_temporary_files_without_output_dir(self):
     log_file = gtest_parallel.Task._logname(None, None, None, None)
@@ -369,8 +395,8 @@ class TestTask(unittest.TestCase):
 
   def test_run_normal_task(self):
     def run_test(temp_dir):
-      task = gtest_parallel.Task('fake/binary', 'test', ['fake/binary'],
-                                 1, None, temp_dir)
+      task = gtest_parallel.Task('fake/binary', 'test', ['fake/binary'], 1,
+                                 None, temp_dir)
 
       self.assertFalse(os.path.isfile(task.log_file))
 
@@ -383,8 +409,8 @@ class TestTask(unittest.TestCase):
 
   def test_run_interrupted_task_with_transient_log(self):
     def run_test(_):
-      task = gtest_parallel.Task('fake/binary', 'test', ['fake/binary'],
-                                 1, None, None)
+      task = gtest_parallel.Task('fake/binary', 'test', ['fake/binary'], 1,
+                                 None, None)
 
       self.assertTrue(os.path.isfile(task.log_file))
 
@@ -405,6 +431,9 @@ class TestFilterFormat(unittest.TestCase):
       def write(*args):
         pass
 
+      def flush(*args):
+        pass
+
     with guard_temp_dir() as temp_dir, \
         guard_patch_module('sys.stdout', StdoutMock()):
       logger = gtest_parallel.FilterFormat(None if drop_output else temp_dir)
@@ -418,12 +447,12 @@ class TestFilterFormat(unittest.TestCase):
     def run_test(logger):
       passed = [
           TaskMock(
-            ('fake/binary', 'FakeTest'), 0, {
-              'runtime_ms': [10],
-              'exit_code': [0],
-              'last_execution_time': [10],
-              'log_file': [os.path.join(tempfile.gettempdir(), 'fake.log')]
-          })
+              ('fake/binary', 'FakeTest'), 0, {
+                  'runtime_ms': [10],
+                  'exit_code': [0],
+                  'last_execution_time': [10],
+                  'log_file': [os.path.join(tempfile.gettempdir(), 'fake.log')]
+              })
       ]
 
       open(passed[0].log_file, 'w').close()
@@ -444,12 +473,12 @@ class TestFilterFormat(unittest.TestCase):
     def run_test(logger):
       failed = [
           TaskMock(
-            ('fake/binary', 'FakeTest'), 0, {
-              'runtime_ms': [10],
-              'exit_code': [1],
-              'last_execution_time': [10],
-              'log_file': [os.path.join(logger.output_dir, 'fake.log')]
-          })
+              ('fake/binary', 'FakeTest'), 0, {
+                  'runtime_ms': [10],
+                  'exit_code': [1],
+                  'last_execution_time': [10],
+                  'log_file': [os.path.join(logger.output_dir, 'fake.log')]
+              })
       ]
 
       open(failed[0].log_file, 'w').close()
@@ -464,7 +493,7 @@ class TestFilterFormat(unittest.TestCase):
 
       self.assertFalse(os.path.isfile(failed[0].log_file))
       self.assertTrue(
-        os.path.isfile(os.path.join(logger.output_dir, 'failed', 'fake.log')))
+          os.path.isfile(os.path.join(logger.output_dir, 'failed', 'fake.log')))
 
       logger.summarize([], failed, [])
 
@@ -524,8 +553,8 @@ class TestFindTests(unittest.TestCase):
     subprocess_mock = SubprocessMock(test_data)
     options = self._process_options(options or [])
     with guard_patch_module('subprocess.check_output', subprocess_mock):
-      tasks = gtest_parallel.find_tests(
-        test_data.keys(), [], options, TestTimesMock(self, test_data))
+      tasks = gtest_parallel.find_tests(test_data.keys(), [], options,
+                                        TestTimesMock(self, test_data))
     # Clean transient tasks' log files created because
     # by default now output_dir is None.
     for task in tasks:
@@ -549,8 +578,7 @@ class TestFindTests(unittest.TestCase):
 
   def test_runs_disabled_tests_when_asked(self):
     tasks, subprocess_mock = self._call_find_tests(
-        self.ONE_DISABLED_ONE_ENABLED_TEST,
-        ['--gtest_also_run_disabled_tests'])
+        self.ONE_DISABLED_ONE_ENABLED_TEST, ['--gtest_also_run_disabled_tests'])
     self.assertEqual(len(tasks), 2)
     self.assertEqual(sorted([task.test_name for task in tasks]),
                      ["FakeTest.DISABLED_Test2", "FakeTest.Test1"])
@@ -562,12 +590,11 @@ class TestFindTests(unittest.TestCase):
     self.assertEqual(len(tasks), 2)
     self.assertEqual(sorted([task.test_name for task in tasks]),
                      ["FakeTest.FailedTest", "FakeTest.Test"])
-    self.assertEqual({task.last_execution_time for task in tasks},
-                     {None, 1})
+    self.assertEqual({task.last_execution_time for task in tasks}, {None, 1})
 
   def test_runs_only_failed_tests_when_asked(self):
-    tasks, _ = self._call_find_tests(
-        self.ONE_FAILED_ONE_PASSED_TEST, ['--failed'])
+    tasks, _ = self._call_find_tests(self.ONE_FAILED_ONE_PASSED_TEST,
+                                     ['--failed'])
     self.assertEqual(len(tasks), 1)
     self.assertEqual(tasks[0].test_binary, "fake_unittests")
     self.assertEqual(tasks[0].test_name, "FakeTest.FailedTest")
@@ -575,14 +602,14 @@ class TestFindTests(unittest.TestCase):
 
   def test_does_not_apply_gtest_filter_by_default(self):
     _, subprocess_mock = self._call_find_tests(self.ONE_TEST)
-    self.assertFalse(any(
-        arg.startswith('--gtest_filter=SomeFilter')
-        for arg in subprocess_mock.last_invocation
-    ))
+    self.assertFalse(
+        any(
+            arg.startswith('--gtest_filter=SomeFilter')
+            for arg in subprocess_mock.last_invocation))
 
   def test_applies_gtest_filter(self):
-    _, subprocess_mock = self._call_find_tests(
-        self.ONE_TEST, ['--gtest_filter=SomeFilter'])
+    _, subprocess_mock = self._call_find_tests(self.ONE_TEST,
+                                               ['--gtest_filter=SomeFilter'])
     self.assertIn('--gtest_filter=SomeFilter', subprocess_mock.last_invocation)
 
   def test_applies_gtest_color_by_default(self):
@@ -605,12 +632,10 @@ class TestFindTests(unittest.TestCase):
     # Test all tasks have the same test_name, test_binary and test_command
     all_tasks_set = set(
         (task.test_name, task.test_binary, tuple(task.test_command))
-        for task in tasks
-    )
+        for task in tasks)
     self.assertEqual(len(all_tasks_set), 1)
     # Test tasks have consecutive execution_numbers starting from 1
-    self.assertEqual(sorted(task.execution_number for task in tasks),
-                     [1, 2, 3])
+    self.assertEqual(sorted(task.execution_number for task in tasks), [1, 2, 3])
 
   def test_gtest_list_tests_fails(self):
     def exit_mock(*args):

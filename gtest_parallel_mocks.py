@@ -54,8 +54,8 @@ class TestTimesMock(object):
 
   def get_test_time(self, test_binary, test_name):
     test_group, test = test_name.split('.')
-    return self.test_data.get(
-        test_binary, {}).get(test_group, {}).get(test, None)
+    return self.test_data.get(test_binary, {}).get(test_group,
+                                                   {}).get(test, None)
 
   def assertRecorded(self, test_id, expected, retries):
     self.test_lib.assertIn(test_id, self.last_execution_times)
@@ -73,7 +73,7 @@ class TestResultsMock(object):
 
   def assertRecorded(self, test_id, expected, retries):
     test_results = [
-        (test_id[1], runtime_ms, 'PASS' if exit_code == 0 else 'FAIL')
+        (test_id[1], runtime_ms / 1000.0, exit_code)
         for runtime_ms, exit_code in zip(expected['runtime_ms'][:retries],
                                          expected['exit_code'][:retries])
     ]
@@ -88,8 +88,16 @@ class TaskManagerMock(object):
 
     self.had_running_parallel_groups = False
     self.total_tasks_run = 0
+    self.started = {}
+
+  def __register_start(self, task):
+    self.started[task.task_id] = task
+
+  def register_exit(self, task):
+    self.started.pop(task.task_id)
 
   def run_task(self, task):
+    self.__register_start(task)
     test_group = task.test_name.split('.')[0]
 
     with self.check_lock:
