@@ -355,17 +355,23 @@ class FilterFormat(object):
     for task in tasks:
       shutil.move(task.log_file, destination_dir)
 
-  def print_tests(self, message, tasks, print_try_number):
+  def print_tests(self, message, tasks, print_try_number, print_test_command):
     self.out.permanent_line("%s (%s/%s):" %
                             (message, len(tasks), self.total_tasks))
     for task in sorted(tasks):
       runtime_ms = 'Interrupted'
       if task.runtime_ms is not None:
         runtime_ms = '%d ms' % task.runtime_ms
-      self.out.permanent_line(
-          "%11s: %s %s%s" %
-          (runtime_ms, task.test_binary, task.test_name,
-           (" (try #%d)" % task.execution_number) if print_try_number else ""))
+      if print_test_command:
+        self.out.permanent_line(
+            "%11s: %s%s" %
+            (runtime_ms, " ".join(task.test_command),
+            (" (try #%d)" % task.execution_number) if print_try_number else ""))
+      else:
+        self.out.permanent_line(
+            "%11s: %s %s%s" %
+            (runtime_ms, task.test_binary, task.test_name,
+            (" (try #%d)" % task.execution_number) if print_try_number else ""))
 
   def log_exit(self, task):
     with self.stdout_lock:
@@ -783,6 +789,11 @@ def default_options_parser():
       action='store_true',
       default=False,
       help='list the run time of each test at the end of execution')
+  parser.add_option(
+      '--print_test_command',
+      action='store_true',
+      default=False,
+      help='Print full test command instead of name')
   parser.add_option('--shard_count',
                     type='int',
                     default=1,
@@ -894,19 +905,19 @@ def main():
   if task_manager.passed:
     logger.move_to('passed', task_manager.passed)
     if options.print_test_times:
-      logger.print_tests('PASSED TESTS', task_manager.passed, print_try_number)
+      logger.print_tests('PASSED TESTS', task_manager.passed, print_try_number, options.print_test_command)
 
   if task_manager.failed:
-    logger.print_tests('FAILED TESTS', task_manager.failed, print_try_number)
+    logger.print_tests('FAILED TESTS', task_manager.failed, print_try_number, options.print_test_command)
     logger.move_to('failed', task_manager.failed)
 
   if task_manager.timed_out:
-    logger.print_tests('TIMED OUT TESTS', task_manager.timed_out, print_try_number)
+    logger.print_tests('TIMED OUT TESTS', task_manager.timed_out, print_try_number, options.print_test_command)
     logger.move_to('timed_out', task_manager.timed_out)
 
   if task_manager.started:
     logger.print_tests('INTERRUPTED TESTS', task_manager.started.values(),
-                       print_try_number)
+                       print_try_number, options.print_test_command)
     logger.move_to('interrupted', task_manager.started.values())
 
   if options.repeat > 1 and (task_manager.failed or task_manager.started):
