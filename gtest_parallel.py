@@ -374,6 +374,13 @@ class FilterFormat(object):
                               (self.finished_tasks, self.total_tasks,
                                task.test_name, task.runtime_ms))
       if task.exit_code != 0:
+        signal_name = None
+        if task.exit_code < 0:
+          try:
+            signal_name = signal.Signals(-task.exit_code).name
+          except ValueError:
+            pass
+
         with open(task.log_file) as f:
           for line in f.readlines():
             self.out.permanent_line(line.rstrip())
@@ -385,6 +392,11 @@ class FilterFormat(object):
           self.out.permanent_line(
             "\033[31m[  TIMEOUT ]\033[0m %s timed out after %d s"
             % (task.test_name, task.runtime_ms/1000))
+        elif signal_name is not None:
+          self.out.permanent_line(
+              "[%d/%d] %s killed by signal %s (%d ms)" %
+              (self.finished_tasks, self.total_tasks, task.test_name,
+               signal_name, task.runtime_ms))
         else:
           self.out.permanent_line(
               "[%d/%d] %s returned with exit code %d (%d ms)" %
