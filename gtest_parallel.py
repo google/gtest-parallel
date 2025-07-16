@@ -363,9 +363,13 @@ class FilterFormat(object):
       if task.runtime_ms is not None:
         runtime_ms = '%d ms' % task.runtime_ms
       if print_test_command:
+        try:
+          cmd_str = " ".join(task.test_command)
+        except TypeError:
+          cmd_str = task.test_command
         self.out.permanent_line(
             "%11s: %s%s" %
-            (runtime_ms, " ".join(task.test_command),
+            (runtime_ms, cmd_str,
             (" (try #%d)" % task.execution_number) if print_try_number else ""))
       else:
         self.out.permanent_line(

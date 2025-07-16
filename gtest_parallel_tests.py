@@ -109,7 +109,7 @@ class TestTaskManager(unittest.TestCase):
 
     for test_id, expected in tasks:
       task = task_mock_factory.get_task(test_id)
-      task_manager.run_task(task)
+      task_manager.run_task(task, timeout_per_test=30)
       expected['execution_number'] = list(range(len(expected['exit_code'])))
 
       logger.assertRecorded(test_id, expected, retries + 1)
@@ -227,7 +227,7 @@ class TestSaveFilePath(unittest.TestCase):
 class TestSerializeTestCases(unittest.TestCase):
   def _execute_tasks(self, max_number_of_test_cases,
                      max_number_of_tests_per_test_case, max_number_of_repeats,
-                     max_number_of_workers, serialize_test_cases):
+                     max_number_of_workers, timeout_per_test, serialize_test_cases):
     tasks = []
     for test_case in range(max_number_of_test_cases):
       for test_name in range(max_number_of_tests_per_test_case):
@@ -245,7 +245,7 @@ class TestSerializeTestCases(unittest.TestCase):
     task_manager = TaskManagerMock()
 
     gtest_parallel.execute_tasks(tasks, max_number_of_workers, task_manager,
-                                 None, serialize_test_cases)
+                                 None, timeout_per_test, serialize_test_cases)
 
     self.assertEqual(serialize_test_cases,
                      not task_manager.had_running_parallel_groups)
@@ -256,6 +256,7 @@ class TestSerializeTestCases(unittest.TestCase):
                         max_number_of_tests_per_test_case=32,
                         max_number_of_repeats=1,
                         max_number_of_workers=16,
+                        timeout_per_test=30,
                         serialize_test_cases=True)
 
   def test_running_parallel_test_cases_with_repeats(self):
@@ -263,6 +264,7 @@ class TestSerializeTestCases(unittest.TestCase):
                         max_number_of_tests_per_test_case=32,
                         max_number_of_repeats=4,
                         max_number_of_workers=16,
+                        timeout_per_test=30,
                         serialize_test_cases=True)
 
   def test_running_parallel_tests(self):
@@ -270,6 +272,7 @@ class TestSerializeTestCases(unittest.TestCase):
                         max_number_of_tests_per_test_case=128,
                         max_number_of_repeats=1,
                         max_number_of_workers=16,
+                        timeout_per_test=30,
                         serialize_test_cases=False)
 
 
@@ -324,12 +327,14 @@ class TestTestTimes(unittest.TestCase):
 class TestTimeoutTestCases(unittest.TestCase):
   def test_task_timeout(self):
     timeout = 1
+    pool_size = 1
+    timeout_per_test = 30
     task = gtest_parallel.Task('test_binary', 'test_name', ['test_command'], 1,
                                None, 'output_dir')
     tasks = [task]
 
     task_manager = TaskManagerMock()
-    gtest_parallel.execute_tasks(tasks, 1, task_manager, timeout, True)
+    gtest_parallel.execute_tasks(tasks, pool_size, task_manager, timeout, timeout_per_test, True)
 
     self.assertEqual(1, task_manager.total_tasks_run)
     self.assertEqual(None, task.exit_code)
@@ -400,7 +405,7 @@ class TestTask(unittest.TestCase):
 
       self.assertFalse(os.path.isfile(task.log_file))
 
-      task.run()
+      task.run(timeout_per_test=30)
 
       self.assertTrue(os.path.isfile(task.log_file))
       self.assertEqual(42, task.exit_code)
@@ -414,7 +419,7 @@ class TestTask(unittest.TestCase):
 
       self.assertTrue(os.path.isfile(task.log_file))
 
-      task.run()
+      task.run(timeout_per_test=30)
 
       self.assertTrue(os.path.isfile(task.log_file))
       self.assertIsNone(task.exit_code)
@@ -462,7 +467,7 @@ class TestFilterFormat(unittest.TestCase):
 
       self.assertFalse(os.path.isfile(passed[0].log_file))
 
-      logger.print_tests('', passed, True)
+      logger.print_tests('', passed, print_try_number=True, print_test_command=True)
       logger.move_to(None, passed)
 
       logger.summarize(passed, [], [])
@@ -488,7 +493,7 @@ class TestFilterFormat(unittest.TestCase):
 
       self.assertTrue(os.path.isfile(failed[0].log_file))
 
-      logger.print_tests('', failed, True)
+      logger.print_tests('', failed, print_try_number=True, print_test_command=True)
       logger.move_to('failed', failed)
 
       self.assertFalse(os.path.isfile(failed[0].log_file))

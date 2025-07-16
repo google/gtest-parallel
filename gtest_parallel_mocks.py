@@ -96,7 +96,7 @@ class TaskManagerMock(object):
   def register_exit(self, task):
     self.started.pop(task.task_id)
 
-  def run_task(self, task):
+  def run_task(self, task, timeout_per_test):
     self.__register_start(task)
     test_group = task.test_name.split('.')[0]
 
@@ -152,7 +152,7 @@ class TaskMock(object):
     self.test_name = test_id[1]
     self.task_id = (test_id[0], test_id[1], execution_number)
 
-  def run(self):
+  def run(self, timeout_per_test):
     pass
 
 
