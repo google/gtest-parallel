@@ -684,7 +684,8 @@ def find_tests(binaries, additional_args, options, times):
       if options.failed and last_execution_time is not None:
         continue
 
-      test_command = command + ['--gtest_filter=' + test_name]
+      test_command = [a.replace('{#}', f"{test_count}")
+                      for a in command] + ['--gtest_filter=' + test_name]
       if (test_count - options.shard_index) % options.shard_count == 0:
         for execution_number in range(options.repeat):
           tasks.append(
