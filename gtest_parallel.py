@@ -243,6 +243,7 @@ class Task(object):
       try:
         self.exit_code = sigint_handler.wait(task, timeout_per_test)
       except sigint_handler.ProcessWasInterrupted:
+        self.runtime_ms = int(1000 * (time.time() - begin))
         thread.exit()
     self.runtime_ms = int(1000 * (time.time() - begin))
     self.last_execution_time = None if self.exit_code else self.runtime_ms
@@ -359,9 +360,13 @@ class FilterFormat(object):
     self.out.permanent_line("%s (%s/%s):" %
                             (message, len(tasks), self.total_tasks))
     for task in sorted(tasks):
-      runtime_ms = 'Interrupted'
-      if task.runtime_ms is not None:
+      if message == 'INTERRUPTED TESTS':
+        runtime_ms = ('Interrupted: %d ms' % task.runtime_ms
+                      if task.runtime_ms is not None else 'Interrupted')
+      elif task.runtime_ms is not None:
         runtime_ms = '%d ms' % task.runtime_ms
+      else:
+        runtime_ms = 'Interrupted'
       if print_test_command:
         try:
           cmd_str = " ".join(task.test_command)

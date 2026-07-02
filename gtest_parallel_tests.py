@@ -423,6 +423,8 @@ class TestTask(unittest.TestCase):
 
       self.assertTrue(os.path.isfile(task.log_file))
       self.assertIsNone(task.exit_code)
+      self.assertIsNotNone(task.runtime_ms)
+      self.assertGreaterEqual(task.runtime_ms, 0)
 
     self._execute_run_test(run_test, True)
 
@@ -503,6 +505,38 @@ class TestFilterFormat(unittest.TestCase):
       logger.summarize([], failed, [])
 
     self._execute_test(run_test, False)
+
+  def test_print_interrupted_tests_shows_runtime(self):
+    class StdoutCapture(object):
+      def __init__(self):
+        self.lines = []
+
+      def isatty(self):
+        return False
+
+      def write(self, msg):
+        self.lines.append(msg)
+
+      def flush(self):
+        pass
+
+    stdout = StdoutCapture()
+    with guard_patch_module('sys.stdout', stdout):
+      logger = gtest_parallel.FilterFormat(None)
+      logger.log_tasks(1)
+      interrupted = [
+          TaskMock(
+              ('fake/binary', 'FakeTest'), 0, {
+                  'runtime_ms': [1078216],
+                  'exit_code': [None],
+                  'last_execution_time': [None],
+              })
+      ]
+      logger.print_tests('INTERRUPTED TESTS', interrupted,
+                         print_try_number=False, print_test_command=False)
+
+    output = ''.join(stdout.lines)
+    self.assertIn('Interrupted: 1078216 ms: fake/binary FakeTest', output)
 
 
 class TestFindTests(unittest.TestCase):
