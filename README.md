@@ -12,6 +12,12 @@ workers in separate processes. This works fine so long as the tests are self
 contained and do not share resources (reading data is fine, writing to the same
 log file is probably not).
 
+## Installation
+
+Install via pip:
+
+    $ pip install git+https://github.com/google/gtest-parallel
+
 ## Basic Usage
 
 _For a full list of options, see `--help`._

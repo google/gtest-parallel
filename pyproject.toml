@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gtest-parallel"
+version = "1.0.0"
+description = "Execute Google Test binaries in parallel"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [{name = "Google Inc."}]
+requires-python = ">=3.6"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+]
+keywords = ["googletest", "testing", "parallel"]
+
+[project.urls]
+Homepage = "https://github.com/google/gtest-parallel"
+Repository = "https://github.com/google/gtest-parallel.git"
+Documentation = "https://github.com/google/gtest-parallel/blob/master/README.md"
+
+[project.scripts]
+gtest-parallel = "gtest_parallel:main"
+
+[tool.setuptools]
+py-modules = ["gtest_parallel", "gtest_parallel_mocks"]
